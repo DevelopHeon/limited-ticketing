@@ -15,10 +15,15 @@ ext {
             bootDataJpa       : 'org.springframework.boot:spring-boot-starter-data-jpa',
             bootSecurity      : 'org.springframework.boot:spring-boot-starter-security',
             bootWeb           : 'org.springframework.boot:spring-boot-starter-web',
-            h2                : 'com.h2database:h2',
+            flywayCore        : 'org.flywaydb:flyway-core',
+            flywayPostgresql  : 'org.flywaydb:flyway-database-postgresql',
             modulithCore      : 'org.springframework.modulith:spring-modulith-starter-core',
+            modulithDocs      : 'org.springframework.modulith:spring-modulith-docs',
+            postgresql        : 'org.postgresql:postgresql',
             bootTest          : 'org.springframework.boot:spring-boot-starter-test',
             modulithTest      : 'org.springframework.modulith:spring-modulith-starter-test',
+            testcontainersJunit: 'org.testcontainers:junit-jupiter',
+            testcontainersPostgresql: 'org.testcontainers:postgresql',
             junitPlatform     : 'org.junit.platform:junit-platform-launcher'
     ]
 }

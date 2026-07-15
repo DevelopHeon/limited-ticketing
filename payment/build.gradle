@@ -1,5 +1,6 @@
 dependencies {
     api project(':shared')
+    compileOnly rootProject.libraries.modulithCore
     compileOnly rootProject.libraries.jpaApi
     compileOnly rootProject.libraries.springDataJpa
 }

@@ -17,3 +17,6 @@ out/
 
 # Operating system files
 .DS_Store
+
+# Local environment variables
+.env

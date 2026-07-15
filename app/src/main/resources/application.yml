@@ -2,11 +2,12 @@ spring:
   application:
     name: limited-ticketing
   datasource:
-    url: jdbc:h2:mem:limited-ticketing;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
-    driver-class-name: org.h2.Driver
-    username: sa
-    password:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/limited_ticketing}
+    username: ${DB_USERNAME:limited_ticketing}
+    password: ${DB_PASSWORD:limited_ticketing}
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: validate
     open-in-view: false
+  flyway:
+    enabled: true

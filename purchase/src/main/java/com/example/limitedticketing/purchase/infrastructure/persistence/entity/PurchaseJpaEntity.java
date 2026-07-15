@@ -19,8 +19,8 @@ import java.time.LocalDateTime;
 @Table(
         name = "purchases",
         uniqueConstraints = @UniqueConstraint(
-                name = "uk_purchase_member_sale_product",
-                columnNames = {"member_id", "sale_product_id"}
+                name = "uk_purchase_active_purchase_key",
+                columnNames = "active_purchase_key"
         )
 )
 public class PurchaseJpaEntity {
@@ -34,6 +34,9 @@ public class PurchaseJpaEntity {
 
     @Column(name = "sale_product_id", nullable = false, updatable = false)
     private Long saleProductId;
+
+    @Column(name = "active_purchase_key", length = 100)
+    private String activePurchaseKey;
 
     @Column(name = "purchase_price", nullable = false, precision = 19, scale = 2)
     private BigDecimal purchasePrice;
@@ -55,6 +58,7 @@ public class PurchaseJpaEntity {
         this.id = purchase.getId();
         this.memberId = purchase.getMemberId();
         this.saleProductId = purchase.getSaleProductId();
+        this.activePurchaseKey = activePurchaseKey(purchase);
         this.purchasePrice = purchase.getPrice().getAmount();
         this.quantity = purchase.getQuantity();
         this.expiresAt = purchase.getExpiresAt();
@@ -75,5 +79,12 @@ public class PurchaseJpaEntity {
                 expiresAt,
                 status
         );
+    }
+
+    private static String activePurchaseKey(Purchase purchase) {
+        return switch (purchase.getStatus()) {
+            case PENDING_PAYMENT, PAID -> purchase.getMemberId() + ":" + purchase.getSaleProductId();
+            case EXPIRED, CANCELLED -> null;
+        };
     }
 }

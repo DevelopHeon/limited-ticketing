@@ -11,10 +11,15 @@ dependencies {
     implementation rootProject.libraries.bootDataJpa
     implementation rootProject.libraries.bootSecurity
     implementation rootProject.libraries.bootWeb
+    implementation rootProject.libraries.flywayCore
     implementation rootProject.libraries.modulithCore
-    runtimeOnly rootProject.libraries.h2
+    runtimeOnly rootProject.libraries.flywayPostgresql
+    runtimeOnly rootProject.libraries.postgresql
 
     testImplementation rootProject.libraries.bootTest
+    testImplementation rootProject.libraries.modulithDocs
     testImplementation rootProject.libraries.modulithTest
+    testImplementation rootProject.libraries.testcontainersJunit
+    testImplementation rootProject.libraries.testcontainersPostgresql
     testRuntimeOnly rootProject.libraries.junitPlatform
 }

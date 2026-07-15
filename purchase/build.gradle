@@ -1,5 +1,10 @@
 dependencies {
     api project(':shared')
+    implementation project(':member')
+    implementation project(':sale')
+    implementation project(':inventory')
+    compileOnly rootProject.libraries.bootSecurity
+    compileOnly rootProject.libraries.bootWeb
     compileOnly rootProject.libraries.modulithCore
     compileOnly rootProject.libraries.jpaApi
     compileOnly rootProject.libraries.springDataJpa

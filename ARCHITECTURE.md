@@ -45,7 +45,7 @@ payment   -> shared::vo
 purchase  -> shared::vo, member::api, sale::api, inventory::api, payment::api
 ```
 
-`::vo`, `::api`는 Spring Modulith Named Interface다. 모듈 전체를 공개하지 않고, 필요한 하위 패키지만 공개 계약으로 노출한다.
+`::vo`, `::api`는 Spring Modulith Named Interface다. 모듈 전체를 공개하지 않고, 필요한 하위 패키지만 공개 계약으로 노출한다. `application.port.in`과 `application.port.in.dto`는 각각 `api`로 선언해 Facade와 계약 DTO를 함께 공개한다.
 
 ```java
 @ApplicationModule(
@@ -224,7 +224,7 @@ docker compose up -d
 
 ## 8. 이벤트 사용 기준
 
-도메인 이벤트는 상태 변경이 완료됐다는 사실을 표현한다. Aggregate가 이벤트를 만들고, Application Service가 저장과 발행 시점을 조율한다.
+도메인 이벤트는 상태 변경이 완료됐다는 사실을 표현한다. Aggregate가 이벤트를 만들고, Application Service가 저장과 발행 시점을 조율한다. 외부 모듈이 구독할 이벤트는 `domain.event`의 `events` Named Interface로 공개한다.
 
 ```text
 Purchase.reserve()
@@ -233,8 +233,12 @@ Purchase.reserve()
 
 PurchaseCommandService
   -> Purchase 저장
-  -> 저장 성공 뒤 이벤트 발행
+  -> 저장된 Purchase가 PurchaseReserved 생성
+  -> PurchaseEventPublisher에 전달
+  -> 트랜잭션 커밋 뒤 Spring 이벤트 발행
 ```
+
+현재 `PurchaseReserved`는 커밋 뒤에만 발행된다. 트랜잭션이 롤백되면 이벤트는 소비되지 않는다. 후속 비즈니스 요구가 생긴 모듈만 `purchase::events` 의존성을 선언해 구독한다.
 
 처음에는 프로세스 내부 이벤트를 사용한다. 전달 보장, 재시도, 소비자 독립 확장, 별도 서비스 추출이 실제로 필요해질 때 Outbox와 Kafka 도입을 검토한다.
 
@@ -262,3 +266,21 @@ app/build/spring-modulith-docs/
 ```
 
 PlantUML 플러그인 또는 렌더러에서 `*.puml`을 열면 관계도를 볼 수 있다. 새 모듈, Named Interface, 모듈 간 참조를 추가한 뒤에는 반드시 `./gradlew test`를 실행해 검증과 문서 생성을 함께 갱신한다.
+
+## 10. 첫 수직 슬라이스: 구매 예약
+
+첫 구현 범위는 `POST /api/sale-products/{saleProductId}/purchases`다. `local`, `test` 프로필에서는 `X-Member-Id` 헤더를 임시 인증 수단으로 사용한다. OAuth 또는 회원가입은 이 흐름의 범위에 포함하지 않는다.
+
+```text
+X-Member-Id
+  -> DevMemberAuthenticationFilter
+  -> MemberPrincipal
+  -> PurchaseController
+  -> PurchaseCommandFacade
+  -> MemberPurchaseEligibilityFacade(member::api)
+  -> SaleProductPurchaseFacade(sale::api)
+  -> InventoryCommandFacade(inventory::api)
+  -> Purchase 저장
+```
+
+`PurchaseCommandService`가 하나의 트랜잭션 안에서 회원 상태 확인, 판매 가능 여부 확인, 재고 예약, 구매 저장을 조율한다. 같은 회원과 판매 상품으로 활성 구매를 한 번 더 저장하면 `active_purchase_key` 유니크 제약으로 실패하고, 트랜잭션 전체가 롤백되어 재고 예약도 남지 않는다.

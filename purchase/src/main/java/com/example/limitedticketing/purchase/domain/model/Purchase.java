@@ -1,5 +1,6 @@
 package com.example.limitedticketing.purchase.domain.model;
 
+import com.example.limitedticketing.purchase.domain.event.PurchaseReserved;
 import com.example.limitedticketing.shared.vo.Money;
 import java.time.LocalDateTime;
 
@@ -72,6 +73,14 @@ public class Purchase {
             throw new IllegalStateException("Only pending purchases can be cancelled");
         }
         this.status = PurchaseStatus.CANCELLED;
+    }
+
+    public PurchaseReserved reservationEvent() {
+        if (id == null || status != PurchaseStatus.PENDING_PAYMENT) {
+            throw new IllegalStateException("Only persisted pending purchases can create reservation events");
+        }
+
+        return new PurchaseReserved(id, memberId, saleProductId, price, expiresAt);
     }
 
     public Long getId() {

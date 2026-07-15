@@ -25,4 +25,9 @@ public class InventoryRepositoryAdapter implements InventoryRepository {
     public Optional<Inventory> findById(Long inventoryId) {
         return jpaInventoryRepository.findById(inventoryId).map(InventoryJpaEntity::toDomain);
     }
+
+    @Override
+    public Optional<Inventory> findBySaleProductId(Long saleProductId) {
+        return jpaInventoryRepository.findBySaleProductId(saleProductId).map(InventoryJpaEntity::toDomain);
+    }
 }

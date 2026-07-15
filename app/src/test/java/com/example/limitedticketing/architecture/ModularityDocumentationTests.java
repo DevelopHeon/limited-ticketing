@@ -1,4 +1,4 @@
-package com.example.limitedticketing;
+package com.example.limitedticketing.architecture;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.modulith.docs.Documenter;

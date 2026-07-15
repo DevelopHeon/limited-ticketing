@@ -1,5 +1,6 @@
-package com.example.limitedticketing;
+package com.example.limitedticketing.architecture;
 
+import com.example.limitedticketing.LimitedTicketingApplication;
 import com.tngtech.archunit.core.domain.JavaClass;
 import org.springframework.modulith.core.ApplicationModules;
 

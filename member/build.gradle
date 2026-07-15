@@ -1,0 +1,4 @@
+dependencies {
+    compileOnly rootProject.libraries.jpaApi
+    compileOnly rootProject.libraries.springDataJpa
+}

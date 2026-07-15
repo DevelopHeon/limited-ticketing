@@ -1,0 +1,5 @@
+dependencies {
+    api project(':shared')
+    compileOnly rootProject.libraries.jpaApi
+    compileOnly rootProject.libraries.springDataJpa
+}

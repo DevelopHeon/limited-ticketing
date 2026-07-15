@@ -1,0 +1,9 @@
+rootProject.name = 'limited-ticketing'
+
+include 'app'
+include 'shared'
+include 'member'
+include 'sale'
+include 'inventory'
+include 'purchase'
+include 'payment'

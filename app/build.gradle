@@ -1,0 +1,20 @@
+apply plugin: 'org.springframework.boot'
+
+dependencies {
+    implementation project(':shared')
+    implementation project(':member')
+    implementation project(':sale')
+    implementation project(':inventory')
+    implementation project(':purchase')
+    implementation project(':payment')
+
+    implementation rootProject.libraries.bootDataJpa
+    implementation rootProject.libraries.bootSecurity
+    implementation rootProject.libraries.bootWeb
+    implementation rootProject.libraries.modulithCore
+    runtimeOnly rootProject.libraries.h2
+
+    testImplementation rootProject.libraries.bootTest
+    testImplementation rootProject.libraries.modulithTest
+    testRuntimeOnly rootProject.libraries.junitPlatform
+}

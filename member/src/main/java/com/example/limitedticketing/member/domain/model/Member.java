@@ -1,5 +1,6 @@
 package com.example.limitedticketing.member.domain.model;
 
+import com.example.limitedticketing.member.domain.exception.MemberException;
 public class Member {
 
     private final Long id;
@@ -24,7 +25,7 @@ public class Member {
 
     public void ensurePurchasable() {
         if (status != MemberStatus.ACTIVE) {
-            throw new IllegalStateException("Member is not allowed to purchase");
+            throw MemberException.notPurchasable();
         }
     }
 
@@ -46,7 +47,7 @@ public class Member {
 
     private static String requireText(String value, String fieldName) {
         if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(fieldName + " is required");
+            throw MemberException.invalid(fieldName);
         }
         return value;
     }

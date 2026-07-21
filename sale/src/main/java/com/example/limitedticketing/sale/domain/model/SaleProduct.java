@@ -1,5 +1,6 @@
 package com.example.limitedticketing.sale.domain.model;
 
+import com.example.limitedticketing.sale.domain.exception.SaleException;
 import com.example.limitedticketing.shared.vo.Money;
 import com.example.limitedticketing.shared.vo.SalePeriod;
 import java.time.LocalDateTime;
@@ -23,10 +24,10 @@ public class SaleProduct {
     ) {
         this.id = id;
         if (productId == null) {
-            throw new IllegalArgumentException("Product ID is required");
+            throw SaleException.invalid("Product ID is required");
         }
         if (purchaseLimitPerMember != 1) {
-            throw new IllegalArgumentException("Purchase limit per member must be 1");
+            throw SaleException.invalid("Purchase limit per member must be 1");
         }
         this.productId = productId;
         this.price = price;
@@ -52,7 +53,7 @@ public class SaleProduct {
 
     public void open(LocalDateTime openedAt) {
         if (!salePeriod.includes(openedAt)) {
-            throw new IllegalStateException("Sale can only open during the configured sale period");
+            throw SaleException.outsideSalePeriod();
         }
         this.status = SaleStatus.OPEN;
     }
@@ -63,7 +64,7 @@ public class SaleProduct {
 
     public void ensurePurchasableAt(LocalDateTime requestedAt) {
         if (status != SaleStatus.OPEN || !salePeriod.includes(requestedAt)) {
-            throw new IllegalStateException("Sale product is not available");
+            throw SaleException.unavailable();
         }
     }
 

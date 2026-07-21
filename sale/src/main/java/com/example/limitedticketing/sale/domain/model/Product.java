@@ -1,5 +1,6 @@
 package com.example.limitedticketing.sale.domain.model;
 
+import com.example.limitedticketing.sale.domain.exception.SaleException;
 public class Product {
 
     private final Long id;
@@ -24,7 +25,7 @@ public class Product {
 
     public void ensureActive() {
         if (!active) {
-            throw new IllegalStateException("Product is inactive");
+            throw SaleException.productInactive();
         }
     }
 
@@ -46,7 +47,7 @@ public class Product {
 
     private static String requireText(String value, String fieldName) {
         if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(fieldName + " is required");
+            throw SaleException.invalid(fieldName + " is required");
         }
         return value;
     }

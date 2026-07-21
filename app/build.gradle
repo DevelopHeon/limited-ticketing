@@ -10,6 +10,7 @@ dependencies {
 
     implementation rootProject.libraries.bootDataJpa
     implementation rootProject.libraries.bootSecurity
+    implementation rootProject.libraries.bootValidation
     implementation rootProject.libraries.bootWeb
     implementation rootProject.libraries.flywayCore
     implementation rootProject.libraries.modulithCore

@@ -19,7 +19,7 @@ Gradle 하위 프로젝트와 Spring Modulith 애플리케이션 모듈은 서�
 ```text
 limited-ticketing
 ├── app          # Spring Boot 실행, HTTP, Security, DB 구성, 테스트
-├── shared       # 제한된 공통 값 타입
+├── shared       # 제한된 공통 값 타입과 예외 분류 계약
 ├── member       # 회원
 ├── sale         # 상품과 판매
 ├── inventory    # 재고
@@ -38,11 +38,11 @@ Gradle 의존성은 **컴파일 가능 여부**를, Spring Modulith의 `@Applica
 
 ```text
 shared    -> 없음
-member    -> 없음
-sale      -> shared::vo
-inventory -> 없음
-payment   -> shared::vo
-purchase  -> shared::vo, member::api, sale::api, inventory::api, payment::api
+member    -> shared::exception
+sale      -> shared::vo, shared::exception
+inventory -> shared::exception
+purchase  -> shared::vo, shared::exception, member::api, sale::api, inventory::api
+payment   -> shared::vo, shared::exception, purchase::api, inventory::api
 ```
 
 `::vo`, `::api`는 Spring Modulith Named Interface다. 모듈 전체를 공개하지 않고, 필요한 하위 패키지만 공개 계약으로 노출한다. `application.port.in`과 `application.port.in.dto`는 각각 `api`로 선언해 Facade와 계약 DTO를 함께 공개한다.
@@ -72,7 +72,21 @@ package com.example.limitedticketing.member.application.port.in;
 3. 호출 모듈의 Gradle 의존성과 `@ApplicationModule(allowedDependencies = ...)`를 함께 추가한다.
 4. 즉시 응답이 필요하지 않은 후속 작업은 동기 호출보다 이벤트를 우선 검토한다.
 
-`shared`에는 모든 모듈에서 같은 의미를 갖는 값 타입만 둔다. Aggregate, 기능별 API DTO, Repository, 이벤트, 웹/보안 설정은 `shared`에 두지 않는다. 현재 `shared.vo`만 `vo` Named Interface로 공개한다.
+`shared`에는 모든 모듈에서 같은 의미를 갖는 값 타입과 공통 예외 분류 계약만 둔다. Aggregate, 기능별 API DTO, Repository, 이벤트, 웹/보안 설정은 `shared`에 두지 않는다. 현재 `shared.vo`, `shared.exception`이 각각 Named Interface로 공개된다.
+
+### 예외 처리 규칙
+
+각 모듈은 `PurchaseException`, `PaymentException`, `InventoryException`처럼 도메인별 예외를 던진다. 일반적인 `IllegalArgumentException`, `IllegalStateException`, `NoSuchElementException`으로 HTTP 오류를 표현하지 않는다.
+
+도메인 예외는 `shared.exception.DomainException`을 상속하고 다음 정보를 가진다.
+
+```text
+DomainErrorType: INVALID_REQUEST | NOT_FOUND | CONFLICT | FORBIDDEN
+code:            PURCHASE_NOT_FOUND, INSUFFICIENT_INVENTORY 등
+message:         클라이언트에 반환할 오류 설명
+```
+
+`app`의 `GlobalExceptionHandler`는 이 공통 계약을 HTTP 상태와 `ApiErrorResponse`로 변환한다. DB 유니크 제약 같은 `DataIntegrityViolationException`은 별도로 409로 처리한다. 트랜잭션 없이 이벤트를 발행하는 등 내부 구현 오류는 일반 예외로 남겨 500으로 처리한다.
 
 ## 4. 모듈별 책임
 
@@ -181,6 +195,12 @@ HTTP 요청
 
 Facade는 공개 DTO와 내부 Command/Query DTO를 변환하고 Service에 위임한다. 트랜잭션과 비즈니스 규칙은 `*CommandService`, `*QueryService`, Domain에 둔다. `port.out`은 다른 모듈이 호출하는 API가 아니라, Infrastructure가 구현하는 의존성 역전 지점이다.
 
+### 조회와 DTO 생성 규칙
+
+- Aggregate를 식별자로 조회하고 없으면 도메인 예외를 던지는 규칙은 `application.support.*Finder`에 둔다. Command/Query Service는 `Finder`를 주입받아 사용하며, 각 Service에 `getXxx`, `findRequiredXxx` private 메서드로 중복하지 않는다.
+- 한 객체를 다른 DTO/Result로 단순 변환하는 생성 책임은 대상 DTO/Result에 둔다. 원본 객체가 있으면 `from(source)`, 필요한 값을 직접 조합하면 `of(...)` 정적 팩토리를 사용한다.
+- Facade와 Service에는 `toXxx`, `resultOf`처럼 DTO를 단순 생성하는 private 변환 메서드를 두지 않는다. 검증, 여러 소스의 조합, 호출 순서 제어는 해당 계층에 남긴다.
+
 ## 6. 도메인과 영속성 분리
 
 도메인 모델은 순수 Java다. JPA, Spring Data, Spring stereotype을 import하지 않는다.
@@ -284,3 +304,41 @@ X-Member-Id
 ```
 
 `PurchaseCommandService`가 하나의 트랜잭션 안에서 회원 상태 확인, 판매 가능 여부 확인, 재고 예약, 구매 저장을 조율한다. 같은 회원과 판매 상품으로 활성 구매를 한 번 더 저장하면 `active_purchase_key` 유니크 제약으로 실패하고, 트랜잭션 전체가 롤백되어 재고 예약도 남지 않는다.
+
+## 11. 두 번째 수직 슬라이스: 결제 시도와 예약 재고 전이
+
+실제 PG 연동 전까지는 결제 성공·실패를 API로 시뮬레이션한다. `Payment`는 구매당 하나가 아니라 결제 시도 이력이며, 재시도마다 새로운 `paymentRequestKey`로 `READY` Payment를 생성한다.
+
+```text
+POST /api/purchases/{purchaseId}/payments        # 결제 시도 생성
+POST /api/payments/{paymentId}/fail              # 결제 실패 시뮬레이션
+POST /api/payments/{paymentId}/approve           # 결제 승인 시뮬레이션
+POST /api/purchases/{purchaseId}/cancel          # 예약 취소
+```
+
+```text
+결제 실패
+  -> Payment: READY -> FAILED
+  -> Purchase: PENDING_PAYMENT 유지
+  -> Inventory: reserved 유지
+  -> 새 결제 시도 가능
+
+결제 승인
+  -> Payment: READY -> APPROVED
+  -> Purchase: PENDING_PAYMENT -> PAID
+  -> Inventory: reserved -> sold
+
+예약 취소 또는 만료
+  -> Purchase: PENDING_PAYMENT -> CANCELLED 또는 EXPIRED
+  -> Inventory: reserved -> available
+```
+
+예약 만료는 30초 주기의 단일 프로세스 스케줄러가 처리한다. 다중 인스턴스 배포가 필요한 시점에는 중복 실행 방지와 분산 스케줄링 방식을 별도로 결정한다.
+
+`payment` 모듈은 `purchase::api`, `inventory::api`의 공개 Facade와 DTO만 사용한다. `Purchase`, `Inventory`의 JPA Entity나 Repository에는 직접 접근하지 않는다.
+
+## 12. 테스트 범위
+
+- `purchase`, `inventory`, `payment` 모듈의 Domain 단위 테스트는 상태 전이 규칙을 검증한다.
+- `PaymentLifecycleIntegrationTest`는 결제 실패 후 재시도, 승인 시 구매 완료와 재고 판매 전환, 예약 취소 후 재예약을 PostgreSQL Testcontainer에서 검증한다.
+- `ModularityTests`는 `payment -> purchase/inventory` 의존이 각 모듈의 `api` Named Interface로만 향하는지 검증한다.

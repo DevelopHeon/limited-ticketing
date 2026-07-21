@@ -1,6 +1,7 @@
 package com.example.limitedticketing.shared.vo;
 
 import java.time.LocalDateTime;
+import com.example.limitedticketing.shared.exception.SharedValueException;
 
 public final class SalePeriod {
 
@@ -9,7 +10,7 @@ public final class SalePeriod {
 
     private SalePeriod(LocalDateTime startsAt, LocalDateTime endsAt) {
         if (startsAt == null || endsAt == null || !startsAt.isBefore(endsAt)) {
-            throw new IllegalArgumentException("Sale start time must be before end time");
+            throw SharedValueException.invalidSalePeriod();
         }
         this.startsAt = startsAt;
         this.endsAt = endsAt;

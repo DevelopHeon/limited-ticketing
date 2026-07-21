@@ -14,6 +14,7 @@ ext {
             springDataJpa     : 'org.springframework.data:spring-data-jpa',
             bootDataJpa       : 'org.springframework.boot:spring-boot-starter-data-jpa',
             bootSecurity      : 'org.springframework.boot:spring-boot-starter-security',
+            bootValidation    : 'org.springframework.boot:spring-boot-starter-validation',
             bootWeb           : 'org.springframework.boot:spring-boot-starter-web',
             flywayCore        : 'org.flywaydb:flyway-core',
             flywayPostgresql  : 'org.flywaydb:flyway-database-postgresql',

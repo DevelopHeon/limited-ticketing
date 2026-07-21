@@ -1,6 +1,14 @@
 dependencies {
     api project(':shared')
+    implementation project(':purchase')
+    implementation project(':inventory')
     compileOnly rootProject.libraries.modulithCore
     compileOnly rootProject.libraries.jpaApi
     compileOnly rootProject.libraries.springDataJpa
+    compileOnly rootProject.libraries.bootSecurity
+    compileOnly rootProject.libraries.bootValidation
+    compileOnly rootProject.libraries.bootWeb
+
+    testImplementation rootProject.libraries.bootTest
+    testRuntimeOnly rootProject.libraries.junitPlatform
 }

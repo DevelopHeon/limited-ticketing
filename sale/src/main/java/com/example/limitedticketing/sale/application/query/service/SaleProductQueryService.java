@@ -2,9 +2,9 @@ package com.example.limitedticketing.sale.application.query.service;
 
 import com.example.limitedticketing.sale.application.query.dto.FindPurchasableSaleProductQuery;
 import com.example.limitedticketing.sale.application.query.dto.PurchasableSaleProductResult;
+import com.example.limitedticketing.sale.domain.exception.SaleException;
 import com.example.limitedticketing.sale.domain.model.SaleProduct;
 import com.example.limitedticketing.sale.domain.repository.SaleProductRepository;
-import java.util.NoSuchElementException;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -18,7 +18,7 @@ public class SaleProductQueryService {
 
     public PurchasableSaleProductResult findPurchasable(FindPurchasableSaleProductQuery query) {
         SaleProduct saleProduct = saleProductRepository.findById(query.saleProductId())
-            .orElseThrow(() -> new NoSuchElementException("Sale product not found"));
+            .orElseThrow(SaleException::productNotFound);
 
         saleProduct.ensurePurchasableAt(query.requestedAt());
 

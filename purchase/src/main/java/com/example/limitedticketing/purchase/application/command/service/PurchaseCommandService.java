@@ -1,13 +1,17 @@
 package com.example.limitedticketing.purchase.application.command.service;
 
 import com.example.limitedticketing.inventory.application.port.in.InventoryCommandFacade;
+import com.example.limitedticketing.inventory.application.port.in.dto.ReleaseInventoryReservationInput;
 import com.example.limitedticketing.inventory.application.port.in.dto.ReserveInventoryInput;
 import com.example.limitedticketing.member.application.port.in.MemberPurchaseEligibilityFacade;
 import com.example.limitedticketing.member.application.port.in.dto.EnsureMemberPurchasableInput;
 import com.example.limitedticketing.purchase.application.command.dto.PurchaseReservationResult;
+import com.example.limitedticketing.purchase.application.command.dto.CancelPurchaseCommand;
+import com.example.limitedticketing.purchase.application.command.dto.MarkPurchasePaidCommand;
 import com.example.limitedticketing.purchase.application.command.dto.ReservePurchaseCommand;
 import com.example.limitedticketing.purchase.application.port.out.Clock;
 import com.example.limitedticketing.purchase.application.port.out.PurchaseEventPublisher;
+import com.example.limitedticketing.purchase.application.support.PurchaseFinder;
 import com.example.limitedticketing.purchase.domain.model.Purchase;
 import com.example.limitedticketing.purchase.domain.repository.PurchaseRepository;
 import com.example.limitedticketing.sale.application.port.in.SaleProductPurchaseFacade;
@@ -27,6 +31,7 @@ public class PurchaseCommandService {
     private final SaleProductPurchaseFacade saleProductPurchaseFacade;
     private final InventoryCommandFacade inventoryCommandFacade;
     private final PurchaseRepository purchaseRepository;
+    private final PurchaseFinder purchaseFinder;
     private final Clock clock;
     private final PurchaseEventPublisher purchaseEventPublisher;
 
@@ -35,6 +40,7 @@ public class PurchaseCommandService {
         SaleProductPurchaseFacade saleProductPurchaseFacade,
         InventoryCommandFacade inventoryCommandFacade,
         PurchaseRepository purchaseRepository,
+        PurchaseFinder purchaseFinder,
         Clock clock,
         PurchaseEventPublisher purchaseEventPublisher
     ) {
@@ -42,6 +48,7 @@ public class PurchaseCommandService {
         this.saleProductPurchaseFacade = saleProductPurchaseFacade;
         this.inventoryCommandFacade = inventoryCommandFacade;
         this.purchaseRepository = purchaseRepository;
+        this.purchaseFinder = purchaseFinder;
         this.clock = clock;
         this.purchaseEventPublisher = purchaseEventPublisher;
     }
@@ -65,5 +72,24 @@ public class PurchaseCommandService {
         purchaseEventPublisher.publish(purchase.reservationEvent());
 
         return new PurchaseReservationResult(purchase.getId(), purchase.getStatus(), purchase.getExpiresAt());
+    }
+
+    @Transactional
+    public void markPaid(MarkPurchasePaidCommand command) {
+        Purchase purchase = purchaseFinder.getRequired(command.purchaseId());
+
+        purchase.markPaid();
+        purchaseRepository.save(purchase);
+    }
+
+    @Transactional
+    public void cancel(CancelPurchaseCommand command) {
+        Purchase purchase = purchaseFinder.getRequired(command.purchaseId());
+
+        purchase.cancelBy(command.memberId());
+        inventoryCommandFacade.releaseReservation(
+            new ReleaseInventoryReservationInput(purchase.getSaleProductId(), purchase.getQuantity())
+        );
+        purchaseRepository.save(purchase);
     }
 }

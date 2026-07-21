@@ -1,6 +1,7 @@
 package com.example.limitedticketing.purchase.domain.model;
 
 import com.example.limitedticketing.purchase.domain.event.PurchaseReserved;
+import com.example.limitedticketing.purchase.domain.exception.PurchaseException;
 import com.example.limitedticketing.shared.vo.Money;
 import java.time.LocalDateTime;
 
@@ -25,10 +26,10 @@ public class Purchase {
     ) {
         this.id = id;
         if (memberId == null || saleProductId == null || price == null || expiresAt == null) {
-            throw new IllegalArgumentException("Purchase fields are required");
+            throw PurchaseException.invalid("Purchase fields are required");
         }
         if (quantity != 1) {
-            throw new IllegalArgumentException("Purchase quantity must be 1");
+            throw PurchaseException.invalid("Purchase quantity must be 1");
         }
         this.memberId = memberId;
         this.saleProductId = saleProductId;
@@ -56,28 +57,31 @@ public class Purchase {
 
     public void markPaid() {
         if (status != PurchaseStatus.PENDING_PAYMENT) {
-            throw new IllegalStateException("Only pending purchases can be paid");
+            throw PurchaseException.invalidState("Only pending purchases can be paid");
         }
         this.status = PurchaseStatus.PAID;
     }
 
     public void expire(LocalDateTime now) {
         if (status != PurchaseStatus.PENDING_PAYMENT || now.isBefore(expiresAt)) {
-            throw new IllegalStateException("Purchase cannot be expired");
+            throw PurchaseException.invalidState("Purchase cannot be expired");
         }
         this.status = PurchaseStatus.EXPIRED;
     }
 
-    public void cancel() {
+    public void cancelBy(Long memberId) {
+        if (!this.memberId.equals(memberId)) {
+            throw PurchaseException.ownershipViolation();
+        }
         if (status != PurchaseStatus.PENDING_PAYMENT) {
-            throw new IllegalStateException("Only pending purchases can be cancelled");
+            throw PurchaseException.invalidState("Only pending purchases can be cancelled");
         }
         this.status = PurchaseStatus.CANCELLED;
     }
 
     public PurchaseReserved reservationEvent() {
         if (id == null || status != PurchaseStatus.PENDING_PAYMENT) {
-            throw new IllegalStateException("Only persisted pending purchases can create reservation events");
+            throw PurchaseException.invalidState("Only persisted pending purchases can create reservation events");
         }
 
         return new PurchaseReserved(id, memberId, saleProductId, price, expiresAt);

@@ -2,6 +2,7 @@ package com.example.limitedticketing.shared.vo;
 
 import java.math.BigDecimal;
 import java.util.Objects;
+import com.example.limitedticketing.shared.exception.SharedValueException;
 
 public final class Money {
 
@@ -9,7 +10,7 @@ public final class Money {
 
     private Money(BigDecimal amount) {
         if (amount == null || amount.signum() < 0) {
-            throw new IllegalArgumentException("Amount must be zero or positive");
+            throw SharedValueException.invalidMoney();
         }
         this.amount = amount;
     }

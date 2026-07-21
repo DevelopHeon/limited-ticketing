@@ -1,5 +1,6 @@
 package com.example.limitedticketing.inventory.domain.model;
 
+import com.example.limitedticketing.inventory.domain.exception.InventoryException;
 public class Inventory {
 
     private final Long id;
@@ -11,7 +12,7 @@ public class Inventory {
     private Inventory(Long id, Long saleProductId, long availableQuantity, long reservedQuantity, long soldQuantity) {
         this.id = id;
         if (saleProductId == null || availableQuantity < 0 || reservedQuantity < 0 || soldQuantity < 0) {
-            throw new IllegalArgumentException("Sale product ID and non-negative quantity are required");
+            throw InventoryException.invalid("Sale product ID and non-negative quantity are required");
         }
         this.saleProductId = saleProductId;
         this.availableQuantity = availableQuantity;
@@ -36,7 +37,7 @@ public class Inventory {
     public void reserve(long quantity) {
         validateQuantity(quantity);
         if (availableQuantity < quantity) {
-            throw new IllegalStateException("Insufficient inventory");
+            throw InventoryException.insufficientAvailableQuantity();
         }
         availableQuantity -= quantity;
         reservedQuantity += quantity;
@@ -76,14 +77,14 @@ public class Inventory {
 
     private void validateQuantity(long quantity) {
         if (quantity <= 0) {
-            throw new IllegalArgumentException("Quantity must be positive");
+            throw InventoryException.invalid("Quantity must be positive");
         }
     }
 
     private void validateReservedQuantity(long quantity) {
         validateQuantity(quantity);
         if (reservedQuantity < quantity) {
-            throw new IllegalStateException("Reserved inventory is insufficient");
+            throw InventoryException.insufficientReservedQuantity();
         }
     }
 }

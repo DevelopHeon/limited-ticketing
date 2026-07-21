@@ -1,5 +1,6 @@
 package com.example.limitedticketing.payment.domain.model;
 
+import com.example.limitedticketing.payment.domain.exception.PaymentException;
 import com.example.limitedticketing.shared.vo.Money;
 import java.time.LocalDateTime;
 
@@ -22,7 +23,7 @@ public class Payment {
     ) {
         this.id = id;
         if (purchaseId == null || paymentRequestKey == null || paymentRequestKey.isBlank() || amount == null) {
-            throw new IllegalArgumentException("Payment fields are required");
+            throw PaymentException.invalid("Payment fields are required");
         }
         this.purchaseId = purchaseId;
         this.paymentRequestKey = paymentRequestKey;
@@ -48,7 +49,7 @@ public class Payment {
 
     public void approve(LocalDateTime approvedAt) {
         if (status != PaymentStatus.READY || approvedAt == null) {
-            throw new IllegalStateException("Only ready payments can be approved");
+            throw PaymentException.invalidState("Only ready payments can be approved");
         }
         this.status = PaymentStatus.APPROVED;
         this.approvedAt = approvedAt;
@@ -56,9 +57,16 @@ public class Payment {
 
     public void fail() {
         if (status != PaymentStatus.READY) {
-            throw new IllegalStateException("Only ready payments can fail");
+            throw PaymentException.invalidState("Only ready payments can fail");
         }
         this.status = PaymentStatus.FAILED;
+    }
+
+    public void cancel() {
+        if (status != PaymentStatus.READY) {
+            throw PaymentException.invalidState("Only ready payments can be cancelled");
+        }
+        this.status = PaymentStatus.CANCELLED;
     }
 
     public Long getPurchaseId() {

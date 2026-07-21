@@ -8,4 +8,7 @@ dependencies {
     compileOnly rootProject.libraries.modulithCore
     compileOnly rootProject.libraries.jpaApi
     compileOnly rootProject.libraries.springDataJpa
+
+    testImplementation rootProject.libraries.bootTest
+    testRuntimeOnly rootProject.libraries.junitPlatform
 }

@@ -1,8 +1,9 @@
 package com.example.limitedticketing.presentation.exception;
 
+import com.example.limitedticketing.shared.exception.DomainErrorType;
+import com.example.limitedticketing.shared.exception.DomainException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
-import java.util.NoSuchElementException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -16,55 +17,48 @@ public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ApiErrorResponse> handleIllegalArgumentException(
-        IllegalArgumentException exception,
+    @ExceptionHandler(DomainException.class)
+    public ResponseEntity<ApiErrorResponse> handleDomainException(
+        DomainException exception,
         HttpServletRequest request
     ) {
-        log.warn("Invalid request: {}", exception.getMessage());
+        HttpStatus status = httpStatusOf(exception.getErrorType());
+        log.warn("Domain exception [{}]: {}", exception.getCode(), exception.getMessage());
 
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+        return ResponseEntity.status(status)
             .body(new ApiErrorResponse(
                 Instant.now(),
-                HttpStatus.BAD_REQUEST.value(),
-                "INVALID_REQUEST",
+                status.value(),
+                exception.getCode(),
                 exception.getMessage(),
                 request.getRequestURI()
             ));
     }
 
-    @ExceptionHandler(NoSuchElementException.class)
-    public ResponseEntity<ApiErrorResponse> handleNotFoundException(
-        NoSuchElementException exception,
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiErrorResponse> handleDataIntegrityViolation(
+        DataIntegrityViolationException exception,
         HttpServletRequest request
     ) {
-        log.warn("Resource not found: {}", exception.getMessage());
-
-        return ResponseEntity.status(HttpStatus.NOT_FOUND)
-            .body(new ApiErrorResponse(
-                Instant.now(),
-                HttpStatus.NOT_FOUND.value(),
-                "RESOURCE_NOT_FOUND",
-                exception.getMessage(),
-                request.getRequestURI()
-            ));
-    }
-
-    @ExceptionHandler({IllegalStateException.class, DataIntegrityViolationException.class})
-    public ResponseEntity<ApiErrorResponse> handleBusinessConflict(
-        RuntimeException exception,
-        HttpServletRequest request
-    ) {
-        log.warn("Business conflict: {}", exception.getMessage());
+        log.warn("Data integrity violation: {}", exception.getMessage());
 
         return ResponseEntity.status(HttpStatus.CONFLICT)
             .body(new ApiErrorResponse(
                 Instant.now(),
                 HttpStatus.CONFLICT.value(),
-                "BUSINESS_CONFLICT",
+                "DATA_INTEGRITY_VIOLATION",
                 exception.getMessage(),
                 request.getRequestURI()
             ));
+    }
+
+    private HttpStatus httpStatusOf(DomainErrorType errorType) {
+        return switch (errorType) {
+            case INVALID_REQUEST -> HttpStatus.BAD_REQUEST;
+            case NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case CONFLICT -> HttpStatus.CONFLICT;
+            case FORBIDDEN -> HttpStatus.FORBIDDEN;
+        };
     }
 
     @ExceptionHandler(Exception.class)

@@ -9,7 +9,6 @@ import com.example.limitedticketing.purchase.application.command.dto.PurchaseRes
 import com.example.limitedticketing.purchase.application.command.dto.CancelPurchaseCommand;
 import com.example.limitedticketing.purchase.application.command.dto.MarkPurchasePaidCommand;
 import com.example.limitedticketing.purchase.application.command.dto.ReservePurchaseCommand;
-import com.example.limitedticketing.purchase.application.port.out.Clock;
 import com.example.limitedticketing.purchase.application.port.out.PurchaseEventPublisher;
 import com.example.limitedticketing.purchase.application.support.PurchaseFinder;
 import com.example.limitedticketing.purchase.domain.model.Purchase;
@@ -17,6 +16,7 @@ import com.example.limitedticketing.purchase.domain.repository.PurchaseRepositor
 import com.example.limitedticketing.sale.application.port.in.SaleProductPurchaseFacade;
 import com.example.limitedticketing.sale.application.port.in.dto.FindPurchasableSaleProductInput;
 import com.example.limitedticketing.sale.application.port.in.dto.PurchasableSaleProduct;
+import java.time.Clock;
 import java.time.LocalDateTime;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -55,7 +55,7 @@ public class PurchaseCommandService {
 
     @Transactional
     public PurchaseReservationResult reserve(ReservePurchaseCommand command) {
-        LocalDateTime requestedAt = clock.now();
+        LocalDateTime requestedAt = LocalDateTime.now(clock);
 
         memberPurchaseEligibilityFacade.ensurePurchasable(new EnsureMemberPurchasableInput(command.memberId()));
         PurchasableSaleProduct saleProduct = saleProductPurchaseFacade.findPurchasable(

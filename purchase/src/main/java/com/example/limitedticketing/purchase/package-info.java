@@ -2,6 +2,7 @@
     allowedDependencies = {
         "shared::vo",
         "shared::exception",
+        "shared::api",
         "member::api",
         "sale::api",
         "inventory::api"

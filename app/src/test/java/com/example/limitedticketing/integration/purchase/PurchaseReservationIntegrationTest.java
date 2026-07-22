@@ -85,8 +85,9 @@ class PurchaseReservationIntegrationTest {
         mockMvc.perform(post("/api/sale-products/{saleProductId}/purchases", fixture.saleProductId())
                 .header("X-Member-Id", fixture.memberId()))
             .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.purchaseId").isNumber())
-            .andExpect(jsonPath("$.status").value(PurchaseStatus.PENDING_PAYMENT.name()));
+            .andExpect(jsonPath("$.code").value("SUCCESS"))
+            .andExpect(jsonPath("$.data.purchaseId").isNumber())
+            .andExpect(jsonPath("$.data.status").value(PurchaseStatus.PENDING_PAYMENT.name()));
 
         Inventory inventory = inventoryRepository.findById(fixture.inventoryId()).orElseThrow();
         assertThat(inventory.getAvailableQuantity()).isZero();

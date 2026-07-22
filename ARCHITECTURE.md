@@ -72,7 +72,7 @@ package com.example.limitedticketing.member.application.port.in;
 3. 호출 모듈의 Gradle 의존성과 `@ApplicationModule(allowedDependencies = ...)`를 함께 추가한다.
 4. 즉시 응답이 필요하지 않은 후속 작업은 동기 호출보다 이벤트를 우선 검토한다.
 
-`shared`에는 모든 모듈에서 같은 의미를 갖는 값 타입과 공통 예외 분류 계약만 둔다. Aggregate, 기능별 API DTO, Repository, 이벤트, 웹/보안 설정은 `shared`에 두지 않는다. 현재 `shared.vo`, `shared.exception`이 각각 Named Interface로 공개된다.
+`shared`에는 모든 모듈에서 같은 의미를 갖는 값 타입, 공통 예외 분류, 공통 HTTP 응답 계약만 둔다. Aggregate, 기능별 API DTO, Repository, 이벤트, 웹/보안 설정은 `shared`에 두지 않는다. 현재 `shared.vo`, `shared.exception`, `shared.api`가 각각 Named Interface로 공개된다.
 
 ### 예외 처리 규칙
 
@@ -139,7 +139,6 @@ purchase
 │       │       ├── PurchaseSummary
 │       │       └── ReservePurchaseInput
 │       └── out                               # 외부 기술 의존 계약
-│           ├── Clock
 │           └── PurchaseEventPublisher
 │
 ├── domain                                    # 순수 비즈니스 규칙
@@ -168,6 +167,7 @@ purchase
 |---|---|---|
 | `presentation.request` | HTTP 입력과 Bean Validation | `*Request` |
 | `presentation.response` | HTTP 응답 JSON | `*Response` |
+| `shared.api` | 성공 HTTP 응답 외피 | `ApiResponse<T>` |
 | `application.command.dto` | 상태 변경 유스케이스 입력/결과 | `*Command`, `*Result` |
 | `application.query.dto` | 조회 유스케이스 입력/결과 | `*Query`, `*Result` |
 | `application.port.in` | Controller와 다른 모듈이 호출하는 공개 진입점 | `*Facade` |
@@ -194,6 +194,10 @@ HTTP 요청
 ```
 
 Facade는 공개 DTO와 내부 Command/Query DTO를 변환하고 Service에 위임한다. 트랜잭션과 비즈니스 규칙은 `*CommandService`, `*QueryService`, Domain에 둔다. `port.out`은 다른 모듈이 호출하는 API가 아니라, Infrastructure가 구현하는 의존성 역전 지점이다.
+
+현재 시각처럼 모든 모듈에서 같은 기술적 의미를 갖는 의존성은 모듈별 port로 중복하지 않는다. `app.configuration.time.TimeConfiguration`이 제공하는 JDK `java.time.Clock` Bean을 직접 주입하고, 테스트에서는 `Clock.fixed(...)`로 대체한다. 영업일·정산 마감처럼 도메인별 시간 정책이 생길 때만 해당 도메인의 별도 port를 둔다.
+
+성공 응답은 `ApiResponse.success(data)`로 `code`와 `data`를 통일한다. HTTP 상태 코드는 본문에 중복하지 않는다. 생성 API처럼 `201 Created` 또는 `Location` 헤더가 필요한 경우에는 `ResponseEntity<ApiResponse<T>>`를 사용하고, 기본 `200 OK` 응답은 `ApiResponse<T>`를 직접 반환한다. 본문이 없는 성공 응답은 `ResponseEntity<Void>`와 `204 No Content`를 사용한다. 오류 응답은 `GlobalExceptionHandler`의 `ApiErrorResponse` 계약을 유지한다.
 
 ### 조회와 DTO 생성 규칙
 

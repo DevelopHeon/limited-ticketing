@@ -6,7 +6,6 @@ import com.example.limitedticketing.payment.application.command.dto.ApprovePayme
 import com.example.limitedticketing.payment.application.command.dto.CreatePaymentCommand;
 import com.example.limitedticketing.payment.application.command.dto.FailPaymentCommand;
 import com.example.limitedticketing.payment.application.command.dto.PaymentAttemptResult;
-import com.example.limitedticketing.payment.application.port.out.Clock;
 import com.example.limitedticketing.payment.application.support.PaymentFinder;
 import com.example.limitedticketing.payment.domain.exception.PaymentException;
 import com.example.limitedticketing.payment.domain.model.Payment;
@@ -16,6 +15,7 @@ import com.example.limitedticketing.purchase.application.port.in.dto.FindPurchas
 import com.example.limitedticketing.purchase.application.port.in.dto.MarkPurchasePaidInput;
 import com.example.limitedticketing.purchase.application.port.in.dto.PurchasePaymentTarget;
 import com.example.limitedticketing.purchase.application.port.in.dto.PurchasePaymentStatus;
+import java.time.Clock;
 import java.time.LocalDateTime;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,7 +45,11 @@ public class PaymentCommandService {
 
     @Transactional
     public PaymentAttemptResult createPayment(CreatePaymentCommand command) {
-        PurchasePaymentTarget purchase = getPendingPurchase(command.memberId(), command.purchaseId(), clock.now());
+        PurchasePaymentTarget purchase = getPendingPurchase(
+            command.memberId(),
+            command.purchaseId(),
+            LocalDateTime.now(clock)
+        );
         Payment payment = paymentRepository.save(
             Payment.request(purchase.purchaseId(), command.paymentRequestKey(), purchase.amount())
         );
@@ -56,9 +60,13 @@ public class PaymentCommandService {
     @Transactional
     public PaymentAttemptResult approve(ApprovePaymentCommand command) {
         Payment payment = paymentFinder.getRequired(command.paymentId());
-        PurchasePaymentTarget purchase = getPendingPurchase(command.memberId(), payment.getPurchaseId(), clock.now());
+        PurchasePaymentTarget purchase = getPendingPurchase(
+            command.memberId(),
+            payment.getPurchaseId(),
+            LocalDateTime.now(clock)
+        );
 
-        payment.approve(clock.now());
+        payment.approve(LocalDateTime.now(clock));
         purchasePaymentFacade.markPaid(new MarkPurchasePaidInput(purchase.purchaseId()));
         inventoryCommandFacade.confirmReservation(
             new ConfirmInventoryReservationInput(purchase.saleProductId(), purchase.quantity())

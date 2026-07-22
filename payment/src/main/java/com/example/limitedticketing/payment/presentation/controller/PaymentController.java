@@ -7,6 +7,7 @@ import com.example.limitedticketing.payment.application.port.in.dto.FailPaymentI
 import com.example.limitedticketing.payment.application.port.in.dto.PaymentAttempt;
 import com.example.limitedticketing.payment.presentation.request.CreatePaymentRequest;
 import com.example.limitedticketing.payment.presentation.response.PaymentAttemptResponse;
+import com.example.limitedticketing.shared.api.ApiResponse;
 import jakarta.validation.Valid;
 import java.net.URI;
 import org.springframework.http.ResponseEntity;
@@ -28,7 +29,7 @@ public class PaymentController {
     }
 
     @PostMapping("/purchases/{purchaseId}/payments")
-    public ResponseEntity<PaymentAttemptResponse> createPayment(
+    public ResponseEntity<ApiResponse<PaymentAttemptResponse>> createPayment(
         @PathVariable("purchaseId") Long purchaseId,
         @AuthenticationPrincipal(expression = "memberId") Long memberId,
         @Valid @RequestBody CreatePaymentRequest request
@@ -38,22 +39,27 @@ public class PaymentController {
         );
         PaymentAttemptResponse response = PaymentAttemptResponse.from(attempt);
 
-        return ResponseEntity.created(URI.create("/api/payments/" + response.paymentId())).body(response);
+        return ResponseEntity.created(URI.create("/api/payments/" + response.paymentId()))
+            .body(ApiResponse.success(response));
     }
 
     @PostMapping("/payments/{paymentId}/approve")
-    public PaymentAttemptResponse approve(
+    public ApiResponse<PaymentAttemptResponse> approve(
         @PathVariable("paymentId") Long paymentId,
         @AuthenticationPrincipal(expression = "memberId") Long memberId
     ) {
-        return PaymentAttemptResponse.from(paymentCommandFacade.approve(new ApprovePaymentInput(memberId, paymentId)));
+        return ApiResponse.success(
+            PaymentAttemptResponse.from(paymentCommandFacade.approve(new ApprovePaymentInput(memberId, paymentId)))
+        );
     }
 
     @PostMapping("/payments/{paymentId}/fail")
-    public PaymentAttemptResponse fail(
+    public ApiResponse<PaymentAttemptResponse> fail(
         @PathVariable("paymentId") Long paymentId,
         @AuthenticationPrincipal(expression = "memberId") Long memberId
     ) {
-        return PaymentAttemptResponse.from(paymentCommandFacade.fail(new FailPaymentInput(memberId, paymentId)));
+        return ApiResponse.success(
+            PaymentAttemptResponse.from(paymentCommandFacade.fail(new FailPaymentInput(memberId, paymentId)))
+        );
     }
 }

@@ -2,9 +2,9 @@ package com.example.limitedticketing.purchase.application.command.service;
 
 import com.example.limitedticketing.inventory.application.port.in.InventoryCommandFacade;
 import com.example.limitedticketing.inventory.application.port.in.dto.ReleaseInventoryReservationInput;
-import com.example.limitedticketing.purchase.application.port.out.Clock;
 import com.example.limitedticketing.purchase.domain.model.Purchase;
 import com.example.limitedticketing.purchase.domain.repository.PurchaseRepository;
+import java.time.Clock;
 import java.time.LocalDateTime;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,7 +28,7 @@ public class PurchaseExpirationService {
 
     @Transactional
     public int expireDuePurchases() {
-        LocalDateTime now = clock.now();
+        LocalDateTime now = LocalDateTime.now(clock);
 
         return purchaseRepository.findPendingPaymentExpiredAtOrBefore(now)
             .stream()

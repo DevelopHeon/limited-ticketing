@@ -88,7 +88,8 @@ class PaymentLifecycleIntegrationTest {
         mockMvc.perform(post("/api/payments/{paymentId}/fail", failedPaymentId)
                 .header("X-Member-Id", fixture.memberId()))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.status").value(PaymentStatus.FAILED.name()));
+            .andExpect(jsonPath("$.code").value("SUCCESS"))
+            .andExpect(jsonPath("$.data.status").value(PaymentStatus.FAILED.name()));
 
         Purchase pendingPurchase = purchaseRepository.findById(purchaseId).orElseThrow();
         Inventory reservedInventory = inventoryRepository.findById(fixture.inventoryId()).orElseThrow();
@@ -100,7 +101,8 @@ class PaymentLifecycleIntegrationTest {
         mockMvc.perform(post("/api/payments/{paymentId}/approve", approvedPaymentId)
                 .header("X-Member-Id", fixture.memberId()))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.status").value(PaymentStatus.APPROVED.name()));
+            .andExpect(jsonPath("$.code").value("SUCCESS"))
+            .andExpect(jsonPath("$.data.status").value(PaymentStatus.APPROVED.name()));
 
         Payment failedPayment = paymentRepository.findById(failedPaymentId).orElseThrow();
         Payment approvedPayment = paymentRepository.findById(approvedPaymentId).orElseThrow();
@@ -149,7 +151,8 @@ class PaymentLifecycleIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"paymentRequestKey\":\"" + paymentRequestKey + "\"}"))
             .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.status").value(PaymentStatus.READY.name()))
+            .andExpect(jsonPath("$.code").value("SUCCESS"))
+            .andExpect(jsonPath("$.data.status").value(PaymentStatus.READY.name()))
             .andReturn();
 
         return responseFieldAsLong(result, "paymentId");
@@ -157,7 +160,7 @@ class PaymentLifecycleIntegrationTest {
 
     private long responseFieldAsLong(MvcResult result, String fieldName) throws Exception {
         JsonNode response = objectMapper.readTree(result.getResponse().getContentAsString());
-        return response.get(fieldName).asLong();
+        return response.path("data").path(fieldName).asLong();
     }
 
     private Fixture createFixture(long inventoryQuantity) {

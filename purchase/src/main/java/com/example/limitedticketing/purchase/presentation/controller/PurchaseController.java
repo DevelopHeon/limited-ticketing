@@ -4,6 +4,7 @@ import com.example.limitedticketing.purchase.application.port.in.PurchaseCommand
 import com.example.limitedticketing.purchase.application.port.in.dto.PurchaseReservation;
 import com.example.limitedticketing.purchase.application.port.in.dto.ReservePurchaseInput;
 import com.example.limitedticketing.purchase.presentation.response.PurchaseReservationResponse;
+import com.example.limitedticketing.shared.api.ApiResponse;
 import java.net.URI;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -23,19 +24,16 @@ public class PurchaseController {
     }
 
     @PostMapping("/{saleProductId}/purchases")
-    public ResponseEntity<PurchaseReservationResponse> reserve(
+    public ResponseEntity<ApiResponse<PurchaseReservationResponse>> reserve(
         @PathVariable("saleProductId") Long saleProductId,
         @AuthenticationPrincipal(expression = "memberId") Long memberId
     ) {
         PurchaseReservation reservation = purchaseCommandFacade.reserve(
             new ReservePurchaseInput(memberId, saleProductId)
         );
-        PurchaseReservationResponse response = new PurchaseReservationResponse(
-            reservation.purchaseId(),
-            reservation.status(),
-            reservation.expiresAt()
-        );
+        PurchaseReservationResponse response = PurchaseReservationResponse.from(reservation);
 
-        return ResponseEntity.created(URI.create("/api/purchases/" + response.purchaseId())).body(response);
+        return ResponseEntity.created(URI.create("/api/purchases/" + response.purchaseId()))
+            .body(ApiResponse.success(response));
     }
 }

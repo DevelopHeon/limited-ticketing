@@ -7,5 +7,9 @@ public interface PaymentRepository {
 
     Payment save(Payment payment);
 
+    IdempotentPayment saveIfAbsent(Payment payment);
+
     Optional<Payment> findById(Long paymentId);
+
+    Optional<Payment> findByPaymentRequestKey(String paymentRequestKey);
 }

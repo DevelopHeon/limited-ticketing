@@ -25,11 +25,19 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -53,6 +61,9 @@ class PaymentLifecycleIntegrationTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private MemberRepository memberRepository;
@@ -132,13 +143,31 @@ class PaymentLifecycleIntegrationTest {
         assertThat(releasedInventory.getReservedQuantity()).isZero();
 
         mockMvc.perform(post("/api/sale-products/{saleProductId}/purchases", fixture.saleProductId())
-                .header("X-Member-Id", fixture.memberId()))
+                .header("X-Member-Id", fixture.memberId())
+                .header("Idempotency-Key", "purchase-request-after-cancel"))
             .andExpect(status().isCreated());
+    }
+
+    @Test
+    void returnsSamePaymentForConcurrentRequestsWithSamePaymentRequestKey() throws Exception {
+        Fixture fixture = createFixture(1);
+        long purchaseId = reserve(fixture);
+
+        List<Long> paymentIds = createPaymentsConcurrently(fixture, purchaseId, "payment-request-idempotent");
+        long paymentCount = jdbcTemplate.queryForObject(
+            "select count(*) from payments where payment_request_key = ?",
+            Long.class,
+            "payment-request-idempotent"
+        );
+
+        assertThat(paymentIds).hasSize(20).allSatisfy(paymentId -> assertThat(paymentId).isEqualTo(paymentIds.get(0)));
+        assertThat(paymentCount).isEqualTo(1);
     }
 
     private long reserve(Fixture fixture) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/sale-products/{saleProductId}/purchases", fixture.saleProductId())
-                .header("X-Member-Id", fixture.memberId()))
+                .header("X-Member-Id", fixture.memberId())
+                .header("Idempotency-Key", "purchase-request-" + System.nanoTime()))
             .andExpect(status().isCreated())
             .andReturn();
 
@@ -156,6 +185,48 @@ class PaymentLifecycleIntegrationTest {
             .andReturn();
 
         return responseFieldAsLong(result, "paymentId");
+    }
+
+    private List<Long> createPaymentsConcurrently(Fixture fixture, long purchaseId, String paymentRequestKey)
+        throws Exception {
+        int requestCount = 20;
+        ExecutorService executor = Executors.newFixedThreadPool(requestCount);
+        CountDownLatch ready = new CountDownLatch(requestCount);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try {
+            List<Future<Long>> results = new ArrayList<>();
+            for (int index = 0; index < requestCount; index++) {
+                results.add(executor.submit(() -> {
+                    ready.countDown();
+                    if (!start.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Concurrent payment start timed out");
+                    }
+
+                    MvcResult result = mockMvc.perform(post("/api/purchases/{purchaseId}/payments", purchaseId)
+                            .header("X-Member-Id", fixture.memberId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"paymentRequestKey\":\"" + paymentRequestKey + "\"}"))
+                        .andExpect(status().isCreated())
+                        .andReturn();
+                    return responseFieldAsLong(result, "paymentId");
+                }));
+            }
+
+            if (!ready.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Concurrent payment requests were not ready");
+            }
+            start.countDown();
+
+            List<Long> paymentIds = new ArrayList<>();
+            for (Future<Long> result : results) {
+                paymentIds.add(result.get(30, TimeUnit.SECONDS));
+            }
+            return paymentIds;
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+        }
     }
 
     private long responseFieldAsLong(MvcResult result, String fieldName) throws Exception {

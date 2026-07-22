@@ -83,7 +83,8 @@ class PurchaseReservationIntegrationTest {
         Fixture fixture = createFixture(1);
 
         mockMvc.perform(post("/api/sale-products/{saleProductId}/purchases", fixture.saleProductId())
-                .header("X-Member-Id", fixture.memberId()))
+                .header("X-Member-Id", fixture.memberId())
+                .header("Idempotency-Key", "purchase-request-1"))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.code").value("SUCCESS"))
             .andExpect(jsonPath("$.data.purchaseId").isNumber())
@@ -111,11 +112,13 @@ class PurchaseReservationIntegrationTest {
         Fixture fixture = createFixture(2);
 
         mockMvc.perform(post("/api/sale-products/{saleProductId}/purchases", fixture.saleProductId())
-                .header("X-Member-Id", fixture.memberId()))
+                .header("X-Member-Id", fixture.memberId())
+                .header("Idempotency-Key", "purchase-request-1"))
             .andExpect(status().isCreated());
 
         mockMvc.perform(post("/api/sale-products/{saleProductId}/purchases", fixture.saleProductId())
-                .header("X-Member-Id", fixture.memberId()))
+                .header("X-Member-Id", fixture.memberId())
+                .header("Idempotency-Key", "purchase-request-2"))
             .andExpect(status().isConflict());
 
         Inventory inventory = inventoryRepository.findById(fixture.inventoryId()).orElseThrow();

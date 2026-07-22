@@ -21,6 +21,14 @@ public final class PaymentException extends DomainException {
         return new PaymentException(DomainErrorType.CONFLICT, "INVALID_PAYMENT_STATE", message);
     }
 
+    public static PaymentException requestKeyReuse() {
+        return new PaymentException(
+            DomainErrorType.CONFLICT,
+            "PAYMENT_REQUEST_KEY_REUSE",
+            "Payment request key cannot be reused for a different purchase"
+        );
+    }
+
     public static PaymentException reservationExpired() {
         return new PaymentException(
             DomainErrorType.CONFLICT,
@@ -34,6 +42,14 @@ public final class PaymentException extends DomainException {
             DomainErrorType.FORBIDDEN,
             "PAYMENT_OWNERSHIP_VIOLATION",
             "Only the purchase member can process payment"
+        );
+    }
+
+    public static PaymentException persistenceFailure() {
+        return new PaymentException(
+            DomainErrorType.INTERNAL_ERROR,
+            "PAYMENT_PERSISTENCE_FAILURE",
+            "Unable to complete payment persistence"
         );
     }
 }

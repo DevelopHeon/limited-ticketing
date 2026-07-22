@@ -11,7 +11,9 @@ import com.example.limitedticketing.purchase.application.command.dto.MarkPurchas
 import com.example.limitedticketing.purchase.application.command.dto.ReservePurchaseCommand;
 import com.example.limitedticketing.purchase.application.port.out.PurchaseEventPublisher;
 import com.example.limitedticketing.purchase.application.support.PurchaseFinder;
+import com.example.limitedticketing.purchase.domain.exception.PurchaseException;
 import com.example.limitedticketing.purchase.domain.model.Purchase;
+import com.example.limitedticketing.purchase.domain.repository.IdempotentPurchase;
 import com.example.limitedticketing.purchase.domain.repository.PurchaseRepository;
 import com.example.limitedticketing.sale.application.port.in.SaleProductPurchaseFacade;
 import com.example.limitedticketing.sale.application.port.in.dto.FindPurchasableSaleProductInput;
@@ -55,23 +57,37 @@ public class PurchaseCommandService {
 
     @Transactional
     public PurchaseReservationResult reserve(ReservePurchaseCommand command) {
+        Purchase existing = purchaseRepository.findByMemberIdAndPurchaseRequestKey(
+                command.memberId(),
+                command.purchaseRequestKey()
+            )
+            .orElse(null);
+        if (existing != null) {
+            return reservationResultOf(existing, command.saleProductId());
+        }
+
         LocalDateTime requestedAt = LocalDateTime.now(clock);
 
         memberPurchaseEligibilityFacade.ensurePurchasable(new EnsureMemberPurchasableInput(command.memberId()));
         PurchasableSaleProduct saleProduct = saleProductPurchaseFacade.findPurchasable(
             new FindPurchasableSaleProductInput(command.saleProductId(), requestedAt)
         );
-        inventoryCommandFacade.reserve(new ReserveInventoryInput(saleProduct.saleProductId(), PURCHASE_QUANTITY));
-
-        Purchase purchase = purchaseRepository.save(Purchase.reserve(
+        IdempotentPurchase savedPurchase = purchaseRepository.saveIfAbsent(Purchase.reserve(
             command.memberId(),
             saleProduct.saleProductId(),
+            command.purchaseRequestKey(),
             saleProduct.price(),
             requestedAt.plusMinutes(RESERVATION_MINUTES)
         ));
+        Purchase purchase = savedPurchase.purchase();
+        if (!savedPurchase.created()) {
+            return reservationResultOf(purchase, command.saleProductId());
+        }
+
+        inventoryCommandFacade.reserve(new ReserveInventoryInput(saleProduct.saleProductId(), PURCHASE_QUANTITY));
         purchaseEventPublisher.publish(purchase.reservationEvent());
 
-        return new PurchaseReservationResult(purchase.getId(), purchase.getStatus(), purchase.getExpiresAt());
+        return reservationResultOf(purchase, command.saleProductId());
     }
 
     @Transactional
@@ -91,5 +107,13 @@ public class PurchaseCommandService {
             new ReleaseInventoryReservationInput(purchase.getSaleProductId(), purchase.getQuantity())
         );
         purchaseRepository.save(purchase);
+    }
+
+    private PurchaseReservationResult reservationResultOf(Purchase purchase, Long saleProductId) {
+        if (!purchase.getSaleProductId().equals(saleProductId)) {
+            throw PurchaseException.requestKeyReuse();
+        }
+
+        return new PurchaseReservationResult(purchase.getId(), purchase.getStatus(), purchase.getExpiresAt());
     }
 }

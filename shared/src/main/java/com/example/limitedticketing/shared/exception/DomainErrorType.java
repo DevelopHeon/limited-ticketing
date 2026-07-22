@@ -4,5 +4,6 @@ public enum DomainErrorType {
     INVALID_REQUEST,
     NOT_FOUND,
     CONFLICT,
-    FORBIDDEN
+    FORBIDDEN,
+    INTERNAL_ERROR
 }

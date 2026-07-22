@@ -9,6 +9,7 @@ import com.example.limitedticketing.payment.application.command.dto.PaymentAttem
 import com.example.limitedticketing.payment.application.support.PaymentFinder;
 import com.example.limitedticketing.payment.domain.exception.PaymentException;
 import com.example.limitedticketing.payment.domain.model.Payment;
+import com.example.limitedticketing.payment.domain.repository.IdempotentPayment;
 import com.example.limitedticketing.payment.domain.repository.PaymentRepository;
 import com.example.limitedticketing.purchase.application.port.in.PurchasePaymentFacade;
 import com.example.limitedticketing.purchase.application.port.in.dto.FindPurchaseForPaymentInput;
@@ -45,16 +46,22 @@ public class PaymentCommandService {
 
     @Transactional
     public PaymentAttemptResult createPayment(CreatePaymentCommand command) {
+        Payment existing = paymentRepository.findByPaymentRequestKey(command.paymentRequestKey()).orElse(null);
+        if (existing != null) {
+            return paymentAttemptResultOf(existing, command.memberId(), command.purchaseId());
+        }
+
         PurchasePaymentTarget purchase = getPendingPurchase(
             command.memberId(),
             command.purchaseId(),
             LocalDateTime.now(clock)
         );
-        Payment payment = paymentRepository.save(
+        IdempotentPayment savedPayment = paymentRepository.saveIfAbsent(
             Payment.request(purchase.purchaseId(), command.paymentRequestKey(), purchase.amount())
         );
+        Payment payment = savedPayment.payment();
 
-        return PaymentAttemptResult.of(payment);
+        return paymentAttemptResultOf(payment, command.memberId(), command.purchaseId());
     }
 
     @Transactional
@@ -110,5 +117,15 @@ public class PaymentCommandService {
         if (!purchase.memberId().equals(memberId)) {
             throw PaymentException.ownershipViolation();
         }
+    }
+
+    private PaymentAttemptResult paymentAttemptResultOf(Payment payment, Long memberId, Long purchaseId) {
+        if (!payment.getPurchaseId().equals(purchaseId)) {
+            throw PaymentException.requestKeyReuse();
+        }
+
+        PurchasePaymentTarget purchase = findPurchase(purchaseId);
+        ensurePurchaseMember(memberId, purchase);
+        return PaymentAttemptResult.of(payment);
     }
 }

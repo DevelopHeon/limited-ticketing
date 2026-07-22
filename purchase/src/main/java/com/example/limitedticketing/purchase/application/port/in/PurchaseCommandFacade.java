@@ -20,7 +20,7 @@ public class PurchaseCommandFacade {
 
     public PurchaseReservation reserve(ReservePurchaseInput input) {
         PurchaseReservationResult result = purchaseCommandService.reserve(
-            new ReservePurchaseCommand(input.memberId(), input.saleProductId())
+            new ReservePurchaseCommand(input.memberId(), input.saleProductId(), input.purchaseRequestKey())
         );
 
         return new PurchaseReservation(result.purchaseId(), result.status(), result.expiresAt());

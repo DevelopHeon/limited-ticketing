@@ -9,7 +9,11 @@ public interface PurchaseRepository {
 
     Purchase save(Purchase purchase);
 
+    IdempotentPurchase saveIfAbsent(Purchase purchase);
+
     Optional<Purchase> findById(Long purchaseId);
+
+    Optional<Purchase> findByMemberIdAndPurchaseRequestKey(Long memberId, String purchaseRequestKey);
 
     List<Purchase> findPendingPaymentExpiredAtOrBefore(LocalDateTime now);
 }

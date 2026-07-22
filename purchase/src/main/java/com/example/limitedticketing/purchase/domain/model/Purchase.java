@@ -10,6 +10,7 @@ public class Purchase {
     private final Long id;
     private final Long memberId;
     private final Long saleProductId;
+    private final String purchaseRequestKey;
     private final Money price;
     private final int quantity;
     private final LocalDateTime expiresAt;
@@ -19,13 +20,15 @@ public class Purchase {
             Long id,
             Long memberId,
             Long saleProductId,
+            String purchaseRequestKey,
             Money price,
             int quantity,
             LocalDateTime expiresAt,
             PurchaseStatus status
     ) {
         this.id = id;
-        if (memberId == null || saleProductId == null || price == null || expiresAt == null) {
+        if (memberId == null || saleProductId == null || purchaseRequestKey == null || purchaseRequestKey.isBlank()
+            || price == null || expiresAt == null) {
             throw PurchaseException.invalid("Purchase fields are required");
         }
         if (quantity != 1) {
@@ -33,26 +36,34 @@ public class Purchase {
         }
         this.memberId = memberId;
         this.saleProductId = saleProductId;
+        this.purchaseRequestKey = purchaseRequestKey;
         this.price = price;
         this.quantity = quantity;
         this.expiresAt = expiresAt;
         this.status = status;
     }
 
-    public static Purchase reserve(Long memberId, Long saleProductId, Money price, LocalDateTime expiresAt) {
-        return new Purchase(null, memberId, saleProductId, price, 1, expiresAt, PurchaseStatus.PENDING_PAYMENT);
+    public static Purchase reserve(
+        Long memberId,
+        Long saleProductId,
+        String purchaseRequestKey,
+        Money price,
+        LocalDateTime expiresAt
+    ) {
+        return new Purchase(null, memberId, saleProductId, purchaseRequestKey, price, 1, expiresAt, PurchaseStatus.PENDING_PAYMENT);
     }
 
     public static Purchase reconstitute(
             Long id,
             Long memberId,
             Long saleProductId,
+            String purchaseRequestKey,
             Money price,
             int quantity,
             LocalDateTime expiresAt,
             PurchaseStatus status
     ) {
-        return new Purchase(id, memberId, saleProductId, price, quantity, expiresAt, status);
+        return new Purchase(id, memberId, saleProductId, purchaseRequestKey, price, quantity, expiresAt, status);
     }
 
     public void markPaid() {
@@ -97,6 +108,17 @@ public class Purchase {
 
     public Long getSaleProductId() {
         return saleProductId;
+    }
+
+    public String getPurchaseRequestKey() {
+        return purchaseRequestKey;
+    }
+
+    public String activePurchaseKey() {
+        return switch (status) {
+            case PENDING_PAYMENT, PAID -> memberId + ":" + saleProductId;
+            case EXPIRED, CANCELLED -> null;
+        };
     }
 
     public PurchaseStatus getStatus() {

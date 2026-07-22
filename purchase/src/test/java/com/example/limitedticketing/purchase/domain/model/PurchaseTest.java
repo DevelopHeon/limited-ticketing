@@ -16,6 +16,7 @@ class PurchaseTest {
         Purchase purchase = Purchase.reserve(
             1L,
             1L,
+            "purchase-request-1",
             Money.of(BigDecimal.valueOf(10_000)),
             LocalDateTime.of(2026, 7, 19, 12, 5)
         );
@@ -28,7 +29,7 @@ class PurchaseTest {
     @Test
     void pendingPurchaseExpiresAtExpirationTime() {
         LocalDateTime expiresAt = LocalDateTime.of(2026, 7, 19, 12, 5);
-        Purchase purchase = Purchase.reserve(1L, 1L, Money.of(BigDecimal.valueOf(10_000)), expiresAt);
+        Purchase purchase = Purchase.reserve(1L, 1L, "purchase-request-1", Money.of(BigDecimal.valueOf(10_000)), expiresAt);
 
         purchase.expire(expiresAt);
 
@@ -41,6 +42,7 @@ class PurchaseTest {
         Purchase purchase = Purchase.reserve(
             1L,
             1L,
+            "purchase-request-1",
             Money.of(BigDecimal.valueOf(10_000)),
             LocalDateTime.of(2026, 7, 19, 12, 5)
         );

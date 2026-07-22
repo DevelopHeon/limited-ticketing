@@ -2,6 +2,8 @@ package com.example.limitedticketing.purchase.infrastructure.persistence;
 
 import com.example.limitedticketing.purchase.domain.model.Purchase;
 import com.example.limitedticketing.purchase.domain.model.PurchaseStatus;
+import com.example.limitedticketing.purchase.domain.exception.PurchaseException;
+import com.example.limitedticketing.purchase.domain.repository.IdempotentPurchase;
 import com.example.limitedticketing.purchase.domain.repository.PurchaseRepository;
 import com.example.limitedticketing.purchase.infrastructure.persistence.entity.PurchaseJpaEntity;
 import com.example.limitedticketing.purchase.infrastructure.persistence.repository.JpaPurchaseRepository;
@@ -25,8 +27,41 @@ public class PurchaseRepositoryAdapter implements PurchaseRepository {
     }
 
     @Override
+    public IdempotentPurchase saveIfAbsent(Purchase purchase) {
+        int inserted = jpaPurchaseRepository.insertIfAbsent(
+            purchase.getMemberId(),
+            purchase.getSaleProductId(),
+            purchase.getPurchaseRequestKey(),
+            purchase.activePurchaseKey(),
+            purchase.getPrice().getAmount(),
+            purchase.getQuantity(),
+            purchase.getExpiresAt(),
+            purchase.getStatus().name()
+        );
+
+        Optional<Purchase> persisted = findByMemberIdAndPurchaseRequestKey(
+            purchase.getMemberId(),
+            purchase.getPurchaseRequestKey()
+        );
+        if (persisted.isPresent()) {
+            return new IdempotentPurchase(persisted.get(), inserted == 1);
+        }
+        if (inserted == 0) {
+            throw PurchaseException.activePurchaseExists();
+        }
+
+        throw PurchaseException.persistenceFailure();
+    }
+
+    @Override
     public Optional<Purchase> findById(Long purchaseId) {
         return jpaPurchaseRepository.findById(purchaseId).map(PurchaseJpaEntity::toDomain);
+    }
+
+    @Override
+    public Optional<Purchase> findByMemberIdAndPurchaseRequestKey(Long memberId, String purchaseRequestKey) {
+        return jpaPurchaseRepository.findByMemberIdAndPurchaseRequestKey(memberId, purchaseRequestKey)
+            .map(PurchaseJpaEntity::toDomain);
     }
 
     @Override

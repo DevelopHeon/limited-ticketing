@@ -79,7 +79,11 @@ class PurchaseConcurrencyIntegrationTest {
         Fixture fixture = createFixture(INITIAL_INVENTORY_QUANTITY);
         List<Long> memberIds = createMembers(REQUEST_COUNT);
 
-        List<Integer> statusCodes = reserveConcurrently(fixture.saleProductId(), memberIds);
+        List<Integer> statusCodes = reserveConcurrently(
+            fixture.saleProductId(),
+            memberIds,
+            memberId -> "purchase-request-" + memberId
+        );
 
         Inventory inventory = inventoryRepository.findById(fixture.inventoryId()).orElseThrow();
         long pendingPurchaseCount = countPurchasesByStatus(fixture.saleProductId(), PurchaseStatus.PENDING_PAYMENT);
@@ -104,22 +108,22 @@ class PurchaseConcurrencyIntegrationTest {
     }
 
     @Test
-    void createsOnlyOneActivePurchaseWhenSameMemberRequestsConcurrently() throws Exception {
+    void returnsSameReservationWhenSameMemberRetriesWithSameRequestKeyConcurrently() throws Exception {
         Fixture fixture = createFixture(INITIAL_INVENTORY_QUANTITY);
         Long memberId = createMembers(1).get(0);
         List<Long> memberIds = java.util.Collections.nCopies(REQUEST_COUNT, memberId);
 
-        List<Integer> statusCodes = reserveConcurrently(fixture.saleProductId(), memberIds);
+        List<Integer> statusCodes = reserveConcurrently(
+            fixture.saleProductId(),
+            memberIds,
+            ignored -> "purchase-request-idempotent"
+        );
 
         Inventory inventory = inventoryRepository.findById(fixture.inventoryId()).orElseThrow();
         long activePurchaseCount = countActivePurchases(memberId, fixture.saleProductId());
-        long createdCount = statusCodes.stream()
-            .filter(status -> status == HttpStatus.CREATED.value())
-            .count();
-
         SoftAssertions.assertSoftly(softly -> {
             softly.assertThat(statusCodes).allMatch(status -> status < HttpStatus.INTERNAL_SERVER_ERROR.value());
-            softly.assertThat(createdCount).isEqualTo(1);
+            softly.assertThat(statusCodes).allMatch(status -> status == HttpStatus.CREATED.value());
             softly.assertThat(activePurchaseCount).isEqualTo(1);
             softly.assertThat(inventory.getAvailableQuantity()).isEqualTo(INITIAL_INVENTORY_QUANTITY - 1);
             softly.assertThat(inventory.getReservedQuantity()).isEqualTo(1);
@@ -127,7 +131,11 @@ class PurchaseConcurrencyIntegrationTest {
         });
     }
 
-    private List<Integer> reserveConcurrently(Long saleProductId, List<Long> memberIds) throws Exception {
+    private List<Integer> reserveConcurrently(
+        Long saleProductId,
+        List<Long> memberIds,
+        java.util.function.Function<Long, String> purchaseRequestKeyProvider
+    ) throws Exception {
         ExecutorService executor = Executors.newFixedThreadPool(memberIds.size());
         CountDownLatch ready = new CountDownLatch(memberIds.size());
         CountDownLatch start = new CountDownLatch(1);
@@ -142,7 +150,8 @@ class PurchaseConcurrencyIntegrationTest {
                     }
 
                     return mockMvc.perform(post("/api/sale-products/{saleProductId}/purchases", saleProductId)
-                            .header("X-Member-Id", memberId))
+                            .header("X-Member-Id", memberId)
+                            .header("Idempotency-Key", purchaseRequestKeyProvider.apply(memberId)))
                         .andReturn()
                         .getResponse()
                         .getStatus();

@@ -35,6 +35,9 @@ public class PurchaseJpaEntity {
     @Column(name = "sale_product_id", nullable = false, updatable = false)
     private Long saleProductId;
 
+    @Column(name = "purchase_request_key", nullable = false, updatable = false, length = 100)
+    private String purchaseRequestKey;
+
     @Column(name = "active_purchase_key", length = 100)
     private String activePurchaseKey;
 
@@ -58,6 +61,7 @@ public class PurchaseJpaEntity {
         this.id = purchase.getId();
         this.memberId = purchase.getMemberId();
         this.saleProductId = purchase.getSaleProductId();
+        this.purchaseRequestKey = purchase.getPurchaseRequestKey();
         this.activePurchaseKey = activePurchaseKey(purchase);
         this.purchasePrice = purchase.getPrice().getAmount();
         this.quantity = purchase.getQuantity();
@@ -74,6 +78,7 @@ public class PurchaseJpaEntity {
                 id,
                 memberId,
                 saleProductId,
+                purchaseRequestKey,
                 Money.of(purchasePrice),
                 quantity,
                 expiresAt,
@@ -82,9 +87,6 @@ public class PurchaseJpaEntity {
     }
 
     private static String activePurchaseKey(Purchase purchase) {
-        return switch (purchase.getStatus()) {
-            case PENDING_PAYMENT, PAID -> purchase.getMemberId() + ":" + purchase.getSaleProductId();
-            case EXPIRED, CANCELLED -> null;
-        };
+        return purchase.activePurchaseKey();
     }
 }

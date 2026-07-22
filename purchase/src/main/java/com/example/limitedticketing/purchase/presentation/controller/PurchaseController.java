@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -26,10 +27,11 @@ public class PurchaseController {
     @PostMapping("/{saleProductId}/purchases")
     public ResponseEntity<ApiResponse<PurchaseReservationResponse>> reserve(
         @PathVariable("saleProductId") Long saleProductId,
-        @AuthenticationPrincipal(expression = "memberId") Long memberId
+        @AuthenticationPrincipal(expression = "memberId") Long memberId,
+        @RequestHeader("Idempotency-Key") String purchaseRequestKey
     ) {
         PurchaseReservation reservation = purchaseCommandFacade.reserve(
-            new ReservePurchaseInput(memberId, saleProductId)
+            new ReservePurchaseInput(memberId, saleProductId, purchaseRequestKey)
         );
         PurchaseReservationResponse response = PurchaseReservationResponse.from(reservation);
 

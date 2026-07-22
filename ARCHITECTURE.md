@@ -229,13 +229,16 @@ purchase/infrastructure/persistence/
 app/src/main/resources/
 ├── application.yml                 # 환경 변수 기반 PostgreSQL 연결 설정
 └── db/migration/
-    └── V1__initial_schema.sql       # 초기 스키마
+    ├── V1__initial_schema.sql       # 초기 스키마
+    └── V2__add_purchase_request_key.sql
 ```
 
 - Flyway migration이 스키마의 유일한 변경 이력이다. 적용된 migration 파일을 수정하지 않고, 변경마다 다음 버전의 새 파일을 추가한다.
 - Hibernate는 `ddl-auto: validate`로 Entity와 실제 스키마의 불일치만 검증한다. `create`, `create-drop`, `update`는 사용하지 않는다.
 - 신규 테이블, 컬럼, 인덱스, 유니크 제약은 해당 JPA Entity 변경과 같은 작업에서 Flyway migration으로 추가한다.
 - `purchases.active_purchase_key`의 유니크 제약은 활성 구매 상태만 중복을 막기 위한 DB 보호 장치다. PostgreSQL의 UNIQUE 제약은 NULL을 여러 개 허용하므로 만료·취소된 구매는 같은 회원과 판매 상품으로 다시 생성할 수 있다.
+- `purchases.purchase_request_key`는 `member_id`와 함께 유니크하다. 동일 구매 요청의 재시도는 기존 Purchase를 반환하고, 같은 키를 다른 판매 상품에 재사용하면 409로 처리한다.
+- `payments.payment_request_key`는 Payment 생성의 멱등 키다. 같은 키와 같은 Purchase는 기존 Payment를 반환하며, 다른 Purchase에 재사용하면 409로 처리한다. 재시도와 별개인 새 결제 시도에는 새로운 키를 사용한다.
 
 로컬 PostgreSQL은 다음 명령으로 실행한다.
 
@@ -293,12 +296,13 @@ PlantUML 플러그인 또는 렌더러에서 `*.puml`을 열면 관계도를 볼
 
 ## 10. 첫 수직 슬라이스: 구매 예약
 
-첫 구현 범위는 `POST /api/sale-products/{saleProductId}/purchases`다. `local`, `test` 프로필에서는 `X-Member-Id` 헤더를 임시 인증 수단으로 사용한다. OAuth 또는 회원가입은 이 흐름의 범위에 포함하지 않는다.
+첫 구현 범위는 `POST /api/sale-products/{saleProductId}/purchases`다. `local`, `test` 프로필에서는 `X-Member-Id` 헤더를 임시 인증 수단으로 사용한다. 구매 생성에는 `Idempotency-Key` 헤더가 필요하다. OAuth 또는 회원가입은 이 흐름의 범위에 포함하지 않는다.
 
 ```text
 X-Member-Id
   -> DevMemberAuthenticationFilter
   -> MemberPrincipal
+Idempotency-Key
   -> PurchaseController
   -> PurchaseCommandFacade
   -> MemberPurchaseEligibilityFacade(member::api)
@@ -307,7 +311,7 @@ X-Member-Id
   -> Purchase 저장
 ```
 
-`PurchaseCommandService`가 하나의 트랜잭션 안에서 회원 상태 확인, 판매 가능 여부 확인, 재고 예약, 구매 저장을 조율한다. 같은 회원과 판매 상품으로 활성 구매를 한 번 더 저장하면 `active_purchase_key` 유니크 제약으로 실패하고, 트랜잭션 전체가 롤백되어 재고 예약도 남지 않는다.
+`PurchaseCommandService`가 하나의 트랜잭션 안에서 회원 상태 확인, 판매 가능 여부 확인, 구매 생성, 재고 예약을 조율한다. 같은 `Idempotency-Key` 요청은 기존 Purchase를 반환하고 재고를 다시 예약하지 않는다. 서로 다른 키로 같은 회원과 상품을 다시 구매하면 `active_purchase_key` 제약으로 409를 반환한다. 두 제약은 PostgreSQL `ON CONFLICT DO NOTHING`과 기존 행 재조회로 처리해, 정상적인 중복 요청을 SQL 예외 로그로 남기지 않는다.
 
 ## 11. 두 번째 수직 슬라이스: 결제 시도와 예약 재고 전이
 
@@ -319,6 +323,8 @@ POST /api/payments/{paymentId}/fail              # 결제 실패 시뮬레이션
 POST /api/payments/{paymentId}/approve           # 결제 승인 시뮬레이션
 POST /api/purchases/{purchaseId}/cancel          # 예약 취소
 ```
+
+결제 생성 요청 본문은 `paymentRequestKey`를 포함한다. 같은 키로 재시도하면 기존 Payment를 반환하며, 새로운 결제 시도를 만들 때만 새 키를 사용한다.
 
 ```text
 결제 실패
@@ -345,4 +351,5 @@ POST /api/purchases/{purchaseId}/cancel          # 예약 취소
 
 - `purchase`, `inventory`, `payment` 모듈의 Domain 단위 테스트는 상태 전이 규칙을 검증한다.
 - `PaymentLifecycleIntegrationTest`는 결제 실패 후 재시도, 승인 시 구매 완료와 재고 판매 전환, 예약 취소 후 재예약을 PostgreSQL Testcontainer에서 검증한다.
+- 구매·결제 멱등성 테스트는 동일 요청 키의 동시 재시도가 하나의 Purchase 또는 Payment만 만들고 기존 결과를 반환하는지 검증한다.
 - `ModularityTests`는 `payment -> purchase/inventory` 의존이 각 모듈의 `api` Named Interface로만 향하는지 검증한다.

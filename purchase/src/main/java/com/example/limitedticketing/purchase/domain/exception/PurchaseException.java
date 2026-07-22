@@ -21,11 +21,35 @@ public final class PurchaseException extends DomainException {
         return new PurchaseException(DomainErrorType.CONFLICT, "INVALID_PURCHASE_STATE", message);
     }
 
+    public static PurchaseException activePurchaseExists() {
+        return new PurchaseException(
+            DomainErrorType.CONFLICT,
+            "ACTIVE_PURCHASE_EXISTS",
+            "An active purchase already exists for this sale product"
+        );
+    }
+
+    public static PurchaseException requestKeyReuse() {
+        return new PurchaseException(
+            DomainErrorType.CONFLICT,
+            "PURCHASE_REQUEST_KEY_REUSE",
+            "Purchase request key cannot be reused for a different sale product"
+        );
+    }
+
     public static PurchaseException ownershipViolation() {
         return new PurchaseException(
             DomainErrorType.FORBIDDEN,
             "PURCHASE_OWNERSHIP_VIOLATION",
             "Only the purchase member can cancel a purchase"
+        );
+    }
+
+    public static PurchaseException persistenceFailure() {
+        return new PurchaseException(
+            DomainErrorType.INTERNAL_ERROR,
+            "PURCHASE_PERSISTENCE_FAILURE",
+            "Unable to complete purchase persistence"
         );
     }
 }

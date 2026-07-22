@@ -22,6 +22,21 @@ public class InventoryRepositoryAdapter implements InventoryRepository {
     }
 
     @Override
+    public boolean reserveIfAvailable(Long saleProductId, long quantity) {
+        return jpaInventoryRepository.reserveIfAvailable(saleProductId, quantity) == 1;
+    }
+
+    @Override
+    public boolean confirmReservationIfAvailable(Long saleProductId, long quantity) {
+        return jpaInventoryRepository.confirmReservationIfAvailable(saleProductId, quantity) == 1;
+    }
+
+    @Override
+    public boolean releaseReservationIfAvailable(Long saleProductId, long quantity) {
+        return jpaInventoryRepository.releaseReservationIfAvailable(saleProductId, quantity) == 1;
+    }
+
+    @Override
     public Optional<Inventory> findById(Long inventoryId) {
         return jpaInventoryRepository.findById(inventoryId).map(InventoryJpaEntity::toDomain);
     }

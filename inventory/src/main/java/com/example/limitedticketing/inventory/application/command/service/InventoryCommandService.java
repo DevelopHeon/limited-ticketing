@@ -4,9 +4,10 @@ import com.example.limitedticketing.inventory.application.command.dto.ConfirmInv
 import com.example.limitedticketing.inventory.application.command.dto.ReleaseInventoryReservationCommand;
 import com.example.limitedticketing.inventory.application.command.dto.ReserveInventoryCommand;
 import com.example.limitedticketing.inventory.application.support.InventoryFinder;
-import com.example.limitedticketing.inventory.domain.model.Inventory;
+import com.example.limitedticketing.inventory.domain.exception.InventoryException;
 import com.example.limitedticketing.inventory.domain.repository.InventoryRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class InventoryCommandService {
@@ -19,24 +20,38 @@ public class InventoryCommandService {
         this.inventoryFinder = inventoryFinder;
     }
 
+    @Transactional
     public void reserve(ReserveInventoryCommand command) {
-        Inventory inventory = inventoryFinder.getRequiredBySaleProductId(command.saleProductId());
-
-        inventory.reserve(command.quantity());
-        inventoryRepository.save(inventory);
+        validatePositiveQuantity(command.quantity());
+        if (!inventoryRepository.reserveIfAvailable(command.saleProductId(), command.quantity())) {
+            throwReservationFailure(command.saleProductId(), InventoryException.insufficientAvailableQuantity());
+        }
     }
 
+    @Transactional
     public void confirmReservation(ConfirmInventoryReservationCommand command) {
-        Inventory inventory = inventoryFinder.getRequiredBySaleProductId(command.saleProductId());
-
-        inventory.confirmReservation(command.quantity());
-        inventoryRepository.save(inventory);
+        validatePositiveQuantity(command.quantity());
+        if (!inventoryRepository.confirmReservationIfAvailable(command.saleProductId(), command.quantity())) {
+            throwReservationFailure(command.saleProductId(), InventoryException.insufficientReservedQuantity());
+        }
     }
 
+    @Transactional
     public void releaseReservation(ReleaseInventoryReservationCommand command) {
-        Inventory inventory = inventoryFinder.getRequiredBySaleProductId(command.saleProductId());
+        validatePositiveQuantity(command.quantity());
+        if (!inventoryRepository.releaseReservationIfAvailable(command.saleProductId(), command.quantity())) {
+            throwReservationFailure(command.saleProductId(), InventoryException.insufficientReservedQuantity());
+        }
+    }
 
-        inventory.releaseReservation(command.quantity());
-        inventoryRepository.save(inventory);
+    private void validatePositiveQuantity(long quantity) {
+        if (quantity <= 0) {
+            throw InventoryException.invalid("Quantity must be positive");
+        }
+    }
+
+    private void throwReservationFailure(Long saleProductId, InventoryException insufficientQuantityException) {
+        inventoryFinder.getRequiredBySaleProductId(saleProductId);
+        throw insufficientQuantityException;
     }
 }

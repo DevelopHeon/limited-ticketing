@@ -92,7 +92,7 @@ class PurchaseConcurrencyIntegrationTest {
             .count();
 
         SoftAssertions.assertSoftly(softly -> {
-            softly.assertThat(statusCodes).allMatch(status -> status < HttpStatus.INTERNAL_SERVER_ERROR.value());
+            softly.assertThat(statusCodes).containsOnly(HttpStatus.CREATED.value(), HttpStatus.CONFLICT.value());
             softly.assertThat(createdCount).isEqualTo(INITIAL_INVENTORY_QUANTITY);
             softly.assertThat(pendingPurchaseCount).isEqualTo(INITIAL_INVENTORY_QUANTITY);
             softly.assertThat(inventory.getAvailableQuantity()).isZero();

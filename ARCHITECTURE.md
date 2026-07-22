@@ -313,6 +313,8 @@ Idempotency-Key
 
 `PurchaseCommandService`가 하나의 트랜잭션 안에서 회원 상태 확인, 판매 가능 여부 확인, 구매 생성, 재고 예약을 조율한다. 같은 `Idempotency-Key` 요청은 기존 Purchase를 반환하고 재고를 다시 예약하지 않는다. 서로 다른 키로 같은 회원과 상품을 다시 구매하면 `active_purchase_key` 제약으로 409를 반환한다. 두 제약은 PostgreSQL `ON CONFLICT DO NOTHING`과 기존 행 재조회로 처리해, 정상적인 중복 요청을 SQL 예외 로그로 남기지 않는다.
 
+재고 예약·예약 확정·예약 반환은 조회 후 저장하지 않고 조건부 원자 UPDATE로 처리한다. 예를 들어 예약은 `available_quantity >= 요청 수량`을 조건으로 `available_quantity`를 줄이고 `reserved_quantity`를 늘린다. 영향 행 수가 0이면 재고 부족으로 409를 반환한다. 따라서 판매 오픈 시 같은 재고 행에 요청이 집중되어도 수량 유실이나 음수 재고가 발생하지 않는다.
+
 ## 11. 두 번째 수직 슬라이스: 결제 시도와 예약 재고 전이
 
 실제 PG 연동 전까지는 결제 성공·실패를 API로 시뮬레이션한다. `Payment`는 구매당 하나가 아니라 결제 시도 이력이며, 재시도마다 새로운 `paymentRequestKey`로 `READY` Payment를 생성한다.
@@ -351,5 +353,6 @@ POST /api/purchases/{purchaseId}/cancel          # 예약 취소
 
 - `purchase`, `inventory`, `payment` 모듈의 Domain 단위 테스트는 상태 전이 규칙을 검증한다.
 - `PaymentLifecycleIntegrationTest`는 결제 실패 후 재시도, 승인 시 구매 완료와 재고 판매 전환, 예약 취소 후 재예약을 PostgreSQL Testcontainer에서 검증한다.
+- `PurchaseConcurrencyIntegrationTest`는 재고 10개에 서로 다른 회원 100명이 동시에 예약할 때 정확히 10건만 생성되고, 나머지는 재고 부족(409)으로 처리되는지 검증한다.
 - 구매·결제 멱등성 테스트는 동일 요청 키의 동시 재시도가 하나의 Purchase 또는 Payment만 만들고 기존 결과를 반환하는지 검증한다.
 - `ModularityTests`는 `payment -> purchase/inventory` 의존이 각 모듈의 `api` Named Interface로만 향하는지 검증한다.

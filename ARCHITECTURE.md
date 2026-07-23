@@ -230,7 +230,8 @@ app/src/main/resources/
 ├── application.yml                 # 환경 변수 기반 PostgreSQL 연결 설정
 └── db/migration/
     ├── V1__initial_schema.sql       # 초기 스키마
-    └── V2__add_purchase_request_key.sql
+    ├── V2__add_purchase_request_key.sql
+    └── V3__replace_scheduled_sale_status.sql
 ```
 
 - Flyway migration이 스키마의 유일한 변경 이력이다. 적용된 migration 파일을 수정하지 않고, 변경마다 다음 버전의 새 파일을 추가한다.
@@ -296,7 +297,11 @@ PlantUML 플러그인 또는 렌더러에서 `*.puml`을 열면 관계도를 볼
 
 ## 10. 첫 수직 슬라이스: 구매 예약
 
-첫 구현 범위는 `POST /api/sale-products/{saleProductId}/purchases`다. `local`, `test` 프로필에서는 `X-Member-Id` 헤더를 임시 인증 수단으로 사용한다. 구매 생성에는 `Idempotency-Key` 헤더가 필요하다. OAuth 또는 회원가입은 이 흐름의 범위에 포함하지 않는다.
+첫 구현 범위는 `POST /api/sale-products/{saleProductId}/purchases`다. `local`, `test` 프로필에서는 `X-Member-Id` 헤더를 임시 인증 수단으로 사용한다. OAuth 또는 회원가입은 이 흐름의 범위에 포함하지 않는다.
+
+멱등성 키는 클라이언트가 임의로 만들지 않고, 먼저 인증된 회원이 `POST /api/idempotency-keys`에 용도(`PURCHASE`, `PAYMENT`)를 요청해 서버에서 발급받는다. 발급 키 형식은 `{용도}_{회원ID}_{UUIDv4}`이며 예시는 `purchase_42_550e8400-e29b-41d4-a716-446655440000`이다. UUIDv4의 충돌 가능성은 실질적으로 무시할 수 있고, 실제 저장 단계의 DB 유니크 제약이 최종 방어선이 된다.
+
+키를 발급받는 것만으로 멱등성이 완료되지는 않는다. 클라이언트는 구매 요청의 `Idempotency-Key` 헤더 또는 결제 요청 본문의 `paymentRequestKey`에 발급받은 값을 넣고, 타임아웃·네트워크 오류로 재시도할 때도 반드시 같은 값을 다시 사용해야 한다. 요청마다 새 키를 발급받으면 서로 다른 요청으로 처리된다.
 
 ```text
 X-Member-Id
@@ -315,7 +320,29 @@ Idempotency-Key
 
 재고 예약·예약 확정·예약 반환은 조회 후 저장하지 않고 조건부 원자 UPDATE로 처리한다. 예를 들어 예약은 `available_quantity >= 요청 수량`을 조건으로 `available_quantity`를 줄이고 `reserved_quantity`를 늘린다. 영향 행 수가 0이면 재고 부족으로 409를 반환한다. 따라서 판매 오픈 시 같은 재고 행에 요청이 집중되어도 수량 유실이나 음수 재고가 발생하지 않는다.
 
-## 11. 두 번째 수직 슬라이스: 결제 시도와 예약 재고 전이
+## 11. 판매 운영과 조회
+
+판매 상품은 `DRAFT -> OPEN -> CLOSED` 상태 전이를 가진다. 생성과 판매 기간 변경은 DRAFT에서만 가능하고, OPEN은 설정한 판매 기간 안에서만 가능하다. 판매 생성 요청에는 상품 정보, 가격, 판매 기간, 초기 재고를 함께 받아 `Product`, `SaleProduct`, `Inventory`를 하나의 트랜잭션에서 생성한다.
+
+```text
+POST /api/admin/sale-products
+  -> Product 생성
+  -> SaleProduct(DRAFT) 생성
+  -> Inventory 초기화
+
+PUT  /api/admin/sale-products/{id}/sale-period
+POST /api/admin/sale-products/{id}/open
+POST /api/admin/sale-products/{id}/close
+
+GET  /api/sale-products?status=OPEN&page=0&size=20
+GET  /api/sale-products/{id}
+```
+
+`GET /api/sale-products/**`는 공개 조회 API다. 관리자 API는 `local`, `test` 프로필에서만 `X-Admin-Id: admin` 헤더로 `ROLE_ADMIN`을 부여받는다. 운영 환경에서는 개발용 필터가 등록되지 않으므로 실제 인증·인가 방식을 도입해야 한다.
+
+목록 Controller는 Spring Data `Pageable`을 HTTP 파라미터 바인딩 용도로만 수신한다. Facade부터는 page, size, 허용된 정렬 enum으로 변환해 전달하고, Infrastructure Adapter가 다시 Spring Data `Pageable`을 생성한다. 현재 허용 정렬 항목은 `id`, `saleStartsAt`, `salePrice`이며 임의의 JPA 필드명은 전달할 수 없다. 현재 목록은 판매 상품과 상품 정보를 조합하며, 조인 Projection이나 QueryDSL은 목록 조회가 실제 병목으로 확인될 때 도입한다.
+
+## 12. 두 번째 수직 슬라이스: 결제 시도와 예약 재고 전이
 
 실제 PG 연동 전까지는 결제 성공·실패를 API로 시뮬레이션한다. `Payment`는 구매당 하나가 아니라 결제 시도 이력이며, 재시도마다 새로운 `paymentRequestKey`로 `READY` Payment를 생성한다.
 
@@ -326,7 +353,7 @@ POST /api/payments/{paymentId}/approve           # 결제 승인 시뮬레이션
 POST /api/purchases/{purchaseId}/cancel          # 예약 취소
 ```
 
-결제 생성 요청 본문은 `paymentRequestKey`를 포함한다. 같은 키로 재시도하면 기존 Payment를 반환하며, 새로운 결제 시도를 만들 때만 새 키를 사용한다.
+결제 생성 요청 본문은 서버가 `POST /api/idempotency-keys`에서 발급한 `PAYMENT` 용도 키를 `paymentRequestKey`로 포함한다. 같은 키로 재시도하면 기존 Payment를 반환하며, 새로운 결제 시도를 만들 때만 새 키를 발급받아 사용한다.
 
 ```text
 결제 실패
@@ -349,10 +376,11 @@ POST /api/purchases/{purchaseId}/cancel          # 예약 취소
 
 `payment` 모듈은 `purchase::api`, `inventory::api`의 공개 Facade와 DTO만 사용한다. `Purchase`, `Inventory`의 JPA Entity나 Repository에는 직접 접근하지 않는다.
 
-## 12. 테스트 범위
+## 13. 테스트 범위
 
 - `purchase`, `inventory`, `payment` 모듈의 Domain 단위 테스트는 상태 전이 규칙을 검증한다.
 - `PaymentLifecycleIntegrationTest`는 결제 실패 후 재시도, 승인 시 구매 완료와 재고 판매 전환, 예약 취소 후 재예약을 PostgreSQL Testcontainer에서 검증한다.
 - `PurchaseConcurrencyIntegrationTest`는 재고 10개에 서로 다른 회원 100명이 동시에 예약할 때 정확히 10건만 생성되고, 나머지는 재고 부족(409)으로 처리되는지 검증한다.
+- `SaleProductManagementIntegrationTest`는 관리자 헤더, DRAFT 생성, 초기 재고 생성, 판매 기간 변경, OPEN/CLOSED 전이와 공개 목록·상세 조회를 검증한다.
 - 구매·결제 멱등성 테스트는 동일 요청 키의 동시 재시도가 하나의 Purchase 또는 Payment만 만들고 기존 결과를 반환하는지 검증한다.
 - `ModularityTests`는 `payment -> purchase/inventory` 의존이 각 모듈의 `api` Named Interface로만 향하는지 검증한다.

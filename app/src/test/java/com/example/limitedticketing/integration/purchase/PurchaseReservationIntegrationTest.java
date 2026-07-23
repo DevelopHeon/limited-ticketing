@@ -17,6 +17,8 @@ import com.example.limitedticketing.sale.domain.repository.ProductRepository;
 import com.example.limitedticketing.sale.domain.repository.SaleProductRepository;
 import com.example.limitedticketing.shared.vo.Money;
 import com.example.limitedticketing.shared.vo.SalePeriod;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -37,6 +39,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 @Testcontainers
 @SpringBootTest
@@ -50,6 +53,9 @@ class PurchaseReservationIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Autowired
     private MemberRepository memberRepository;
@@ -81,10 +87,11 @@ class PurchaseReservationIntegrationTest {
     @Test
     void reservesInventoryAndCreatesPurchaseForAuthenticatedMember() throws Exception {
         Fixture fixture = createFixture(1);
+        String purchaseRequestKey = issuePurchaseKey(fixture.memberId());
 
         mockMvc.perform(post("/api/sale-products/{saleProductId}/purchases", fixture.saleProductId())
                 .header("X-Member-Id", fixture.memberId())
-                .header("Idempotency-Key", "purchase-request-1"))
+                .header("Idempotency-Key", purchaseRequestKey))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.code").value("SUCCESS"))
             .andExpect(jsonPath("$.data.purchaseId").isNumber())
@@ -99,6 +106,18 @@ class PurchaseReservationIntegrationTest {
                 assertThat(event.memberId()).isEqualTo(fixture.memberId());
                 assertThat(event.saleProductId()).isEqualTo(fixture.saleProductId());
             });
+    }
+
+    @Test
+    void issuesUniquePurchaseKeysForAuthenticatedMember() throws Exception {
+        Fixture fixture = createFixture(1);
+
+        String firstKey = issuePurchaseKey(fixture.memberId());
+        String secondKey = issuePurchaseKey(fixture.memberId());
+
+        assertThat(firstKey)
+            .matches("purchase_" + fixture.memberId() + "_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}");
+        assertThat(secondKey).isNotEqualTo(firstKey);
     }
 
     @Test
@@ -141,6 +160,20 @@ class PurchaseReservationIntegrationTest {
         Inventory inventory = inventoryRepository.save(Inventory.initialize(saleProduct.getId(), inventoryQuantity));
 
         return new Fixture(member.getId(), saleProduct.getId(), inventory.getId());
+    }
+
+    private String issuePurchaseKey(Long memberId) throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/idempotency-keys")
+                .header("X-Member-Id", memberId)
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content("{\"operation\":\"PURCHASE\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value("SUCCESS"))
+            .andExpect(jsonPath("$.data.operation").value("PURCHASE"))
+            .andReturn();
+
+        JsonNode response = objectMapper.readTree(result.getResponse().getContentAsString());
+        return response.path("data").path("idempotencyKey").asText();
     }
 
     private record Fixture(Long memberId, Long saleProductId, Long inventoryId) {

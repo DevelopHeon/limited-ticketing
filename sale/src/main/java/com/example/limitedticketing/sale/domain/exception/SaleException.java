@@ -21,6 +21,10 @@ public final class SaleException extends DomainException {
         return new SaleException(DomainErrorType.CONFLICT, "SALE_UNAVAILABLE", "Sale product is not available");
     }
 
+    public static SaleException invalidState(String message) {
+        return new SaleException(DomainErrorType.CONFLICT, "INVALID_SALE_STATE", message);
+    }
+
     public static SaleException outsideSalePeriod() {
         return new SaleException(
             DomainErrorType.CONFLICT,

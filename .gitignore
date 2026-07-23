@@ -19,3 +19,6 @@
 
 # Local environment variables
 .env
+
+# Local load-test artifacts
+load-test/k6/results/

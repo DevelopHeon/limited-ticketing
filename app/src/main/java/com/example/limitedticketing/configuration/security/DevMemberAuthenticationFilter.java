@@ -19,6 +19,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class DevMemberAuthenticationFilter extends OncePerRequestFilter {
 
     private static final String MEMBER_ID_HEADER = "X-Member-Id";
+    private static final String ADMIN_ID_HEADER = "X-Admin-Id";
+    private static final String DEV_ADMIN_ID = "admin";
 
     @Override
     protected void doFilterInternal(
@@ -26,8 +28,17 @@ public class DevMemberAuthenticationFilter extends OncePerRequestFilter {
         HttpServletResponse response,
         FilterChain filterChain
     ) throws ServletException, IOException {
-        String memberIdHeader = request.getHeader(MEMBER_ID_HEADER);
+        if (SecurityContextHolder.getContext().getAuthentication() == null) {
+            String adminIdHeader = request.getHeader(ADMIN_ID_HEADER);
+            if (adminIdHeader != null) {
+                authenticateAdmin(adminIdHeader, request, response);
+                if (response.isCommitted()) {
+                    return;
+                }
+            }
+        }
 
+        String memberIdHeader = request.getHeader(MEMBER_ID_HEADER);
         if (memberIdHeader != null && SecurityContextHolder.getContext().getAuthentication() == null) {
             try {
                 Long memberId = Long.valueOf(memberIdHeader);
@@ -50,5 +61,24 @@ public class DevMemberAuthenticationFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    private void authenticateAdmin(
+        String adminIdHeader,
+        HttpServletRequest request,
+        HttpServletResponse response
+    ) throws IOException {
+        if (!DEV_ADMIN_ID.equals(adminIdHeader)) {
+            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Invalid X-Admin-Id header");
+            return;
+        }
+
+        UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+            new AdminPrincipal(adminIdHeader),
+            null,
+            List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))
+        );
+        authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+        SecurityContextHolder.getContext().setAuthentication(authentication);
     }
 }

@@ -1,10 +1,12 @@
 package com.example.limitedticketing.inventory.application.port.in;
 
 import com.example.limitedticketing.inventory.application.command.dto.ConfirmInventoryReservationCommand;
+import com.example.limitedticketing.inventory.application.command.dto.InitializeInventoryCommand;
 import com.example.limitedticketing.inventory.application.command.dto.ReleaseInventoryReservationCommand;
 import com.example.limitedticketing.inventory.application.command.dto.ReserveInventoryCommand;
 import com.example.limitedticketing.inventory.application.command.service.InventoryCommandService;
 import com.example.limitedticketing.inventory.application.port.in.dto.ConfirmInventoryReservationInput;
+import com.example.limitedticketing.inventory.application.port.in.dto.InitializeInventoryInput;
 import com.example.limitedticketing.inventory.application.port.in.dto.ReleaseInventoryReservationInput;
 import com.example.limitedticketing.inventory.application.port.in.dto.ReserveInventoryInput;
 import org.springframework.stereotype.Component;
@@ -16,6 +18,10 @@ public class InventoryCommandFacade {
 
     public InventoryCommandFacade(InventoryCommandService inventoryCommandService) {
         this.inventoryCommandService = inventoryCommandService;
+    }
+
+    public void initialize(InitializeInventoryInput input) {
+        inventoryCommandService.initialize(new InitializeInventoryCommand(input.saleProductId(), input.initialQuantity()));
     }
 
     public void reserve(ReserveInventoryInput input) {

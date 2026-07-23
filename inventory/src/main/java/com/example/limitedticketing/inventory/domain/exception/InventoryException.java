@@ -17,6 +17,10 @@ public final class InventoryException extends DomainException {
         return new InventoryException(DomainErrorType.INVALID_REQUEST, "INVALID_INVENTORY", message);
     }
 
+    public static InventoryException alreadyInitialized() {
+        return new InventoryException(DomainErrorType.CONFLICT, "INVENTORY_ALREADY_INITIALIZED", "Inventory already exists");
+    }
+
     public static InventoryException insufficientAvailableQuantity() {
         return new InventoryException(DomainErrorType.CONFLICT, "INSUFFICIENT_INVENTORY", "Insufficient inventory");
     }

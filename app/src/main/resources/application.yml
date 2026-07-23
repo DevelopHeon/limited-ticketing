@@ -1,3 +1,5 @@
+server:
+  port: ${PORT:8081}
 spring:
   application:
     name: limited-ticketing
@@ -11,3 +13,5 @@ spring:
     open-in-view: false
   flyway:
     enabled: true
+
+

@@ -1,10 +1,12 @@
 package com.example.limitedticketing.inventory.application.command.service;
 
 import com.example.limitedticketing.inventory.application.command.dto.ConfirmInventoryReservationCommand;
+import com.example.limitedticketing.inventory.application.command.dto.InitializeInventoryCommand;
 import com.example.limitedticketing.inventory.application.command.dto.ReleaseInventoryReservationCommand;
 import com.example.limitedticketing.inventory.application.command.dto.ReserveInventoryCommand;
 import com.example.limitedticketing.inventory.application.support.InventoryFinder;
 import com.example.limitedticketing.inventory.domain.exception.InventoryException;
+import com.example.limitedticketing.inventory.domain.model.Inventory;
 import com.example.limitedticketing.inventory.domain.repository.InventoryRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,6 +20,15 @@ public class InventoryCommandService {
     public InventoryCommandService(InventoryRepository inventoryRepository, InventoryFinder inventoryFinder) {
         this.inventoryRepository = inventoryRepository;
         this.inventoryFinder = inventoryFinder;
+    }
+
+    @Transactional
+    public void initialize(InitializeInventoryCommand command) {
+        validatePositiveQuantity(command.initialQuantity());
+        if (inventoryRepository.findBySaleProductId(command.saleProductId()).isPresent()) {
+            throw InventoryException.alreadyInitialized();
+        }
+        inventoryRepository.save(Inventory.initialize(command.saleProductId(), command.initialQuantity()));
     }
 
     @Transactional

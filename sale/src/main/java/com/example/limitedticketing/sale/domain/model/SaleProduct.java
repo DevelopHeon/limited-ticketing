@@ -10,7 +10,7 @@ public class SaleProduct {
     private final Long id;
     private final Long productId;
     private final Money price;
-    private final SalePeriod salePeriod;
+    private SalePeriod salePeriod;
     private final int purchaseLimitPerMember;
     private SaleStatus status;
 
@@ -36,8 +36,12 @@ public class SaleProduct {
         this.status = status;
     }
 
+    public static SaleProduct createDraft(Long productId, Money price, SalePeriod salePeriod) {
+        return new SaleProduct(null, productId, price, salePeriod, 1, SaleStatus.DRAFT);
+    }
+
     public static SaleProduct schedule(Long productId, Money price, SalePeriod salePeriod) {
-        return new SaleProduct(null, productId, price, salePeriod, 1, SaleStatus.SCHEDULED);
+        return createDraft(productId, price, salePeriod);
     }
 
     public static SaleProduct reconstitute(
@@ -52,6 +56,9 @@ public class SaleProduct {
     }
 
     public void open(LocalDateTime openedAt) {
+        if (status != SaleStatus.DRAFT) {
+            throw SaleException.invalidState("Only draft sale products can be opened");
+        }
         if (!salePeriod.includes(openedAt)) {
             throw SaleException.outsideSalePeriod();
         }
@@ -59,7 +66,17 @@ public class SaleProduct {
     }
 
     public void close() {
+        if (status != SaleStatus.OPEN) {
+            throw SaleException.invalidState("Only open sale products can be closed");
+        }
         this.status = SaleStatus.CLOSED;
+    }
+
+    public void changeSalePeriod(SalePeriod salePeriod) {
+        if (status != SaleStatus.DRAFT) {
+            throw SaleException.invalidState("Only draft sale products can change the sale period");
+        }
+        this.salePeriod = salePeriod;
     }
 
     public void ensurePurchasableAt(LocalDateTime requestedAt) {

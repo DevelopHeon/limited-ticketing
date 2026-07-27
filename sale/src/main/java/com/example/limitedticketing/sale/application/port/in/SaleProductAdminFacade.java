@@ -23,31 +23,35 @@ public class SaleProductAdminFacade {
     }
 
     public SaleProductCommandOutcome create(CreateSaleProductInput input) {
-        return SaleProductCommandOutcome.from(saleProductCommandService.create(new CreateSaleProductCommand(
+        SaleProductCommandResult result = saleProductCommandService.create(new CreateSaleProductCommand(
             input.productName(),
             input.benefitDescription(),
             input.salePrice(),
             input.saleStartsAt(),
             input.saleEndsAt(),
             input.initialInventoryQuantity()
-        )));
+        ));
+        return SaleProductCommandOutcome.of(result.saleProductId(), result.status().name());
     }
 
     public SaleProductCommandOutcome changeSalePeriod(ChangeSalePeriodInput input) {
-        return SaleProductCommandOutcome.from(saleProductCommandService.changeSalePeriod(
+        SaleProductCommandResult result = saleProductCommandService.changeSalePeriod(
             new ChangeSalePeriodCommand(input.saleProductId(), input.saleStartsAt(), input.saleEndsAt())
-        ));
+        );
+        return SaleProductCommandOutcome.of(result.saleProductId(), result.status().name());
     }
 
     public SaleProductCommandOutcome open(OpenSaleProductInput input) {
-        return SaleProductCommandOutcome.from(saleProductCommandService.open(
+        SaleProductCommandResult result = saleProductCommandService.open(
             new OpenSaleProductCommand(input.saleProductId())
-        ));
+        );
+        return SaleProductCommandOutcome.of(result.saleProductId(), result.status().name());
     }
 
     public SaleProductCommandOutcome close(CloseSaleProductInput input) {
-        return SaleProductCommandOutcome.from(saleProductCommandService.close(
+        SaleProductCommandResult result = saleProductCommandService.close(
             new CloseSaleProductCommand(input.saleProductId())
-        ));
+        );
+        return SaleProductCommandOutcome.of(result.saleProductId(), result.status().name());
     }
 }

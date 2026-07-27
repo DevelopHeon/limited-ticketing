@@ -18,10 +18,14 @@ if (memberIds.length < vus) {
 }
 
 export const reservationDuration = new Trend('reservation_duration');
+export const reservationCreatedDuration = new Trend('reservation_created_duration');
+export const reservationConflictDuration = new Trend('reservation_conflict_duration');
 export const reservationSuccesses = new Counter('reservation_successes');
 export const soldOutResponses = new Counter('sold_out_responses');
 export const unexpectedResponses = new Counter('unexpected_responses');
 export const expectedResponseRate = new Rate('expected_response_rate');
+
+http.setResponseCallback(http.expectedStatuses(200, 201, 409));
 
 export const options = {
   scenarios: {
@@ -81,9 +85,11 @@ export default function (data) {
 
   if (response.status === 201) {
     reservationSuccesses.add(1);
+    reservationCreatedDuration.add(response.timings.duration);
     expectedResponseRate.add(1);
   } else if (response.status === 409) {
     soldOutResponses.add(1);
+    reservationConflictDuration.add(response.timings.duration);
     expectedResponseRate.add(1);
   } else {
     unexpectedResponses.add(1);

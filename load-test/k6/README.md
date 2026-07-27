@@ -59,7 +59,11 @@ k6 run load-test/k6/sale-open.js \
 - `reservation_successes`: 예약 성공 수. 초기 재고와 같아야 한다.
 - `sold_out_responses`: 재고 소진으로 인한 409 수. `VUS - 초기 재고`와 같아야 한다.
 - `unexpected_responses`: 201, 409 이외의 응답 수. 0이어야 한다.
-- `reservation_duration`: 예약 API의 응답 시간. p95를 기록한다.
+- `reservation_duration`: 모든 예약 API 응답 시간. p95를 기록한다.
+- `reservation_created_duration`: 성공한 201 예약 응답 시간. 재고 확보·구매 생성 경로의 p95를 기록한다.
+- `reservation_conflict_duration`: 재고 소진 409 응답 시간. 재고 행 경합 후 실패 경로의 p95를 기록한다.
+
+스크립트는 200(키 발급), 201(예약 성공), 409(재고 소진)을 시나리오상 정상 HTTP 응답으로 지정한다. 따라서 `http_req_failed`는 의도된 409이 아니라 실제 예기치 못한 HTTP 상태만 집계한다.
 
 ## DB 락과 낙관적 락 기록
 

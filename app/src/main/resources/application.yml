@@ -13,5 +13,20 @@ spring:
     open-in-view: false
   flyway:
     enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      repositories:
+        enabled: false
 
-
+limited-ticketing:
+  queue:
+    worker:
+      max-concurrent-processing: ${QUEUE_MAX_CONCURRENT_PROCESSING:10}
+      claim-batch-size: ${QUEUE_CLAIM_BATCH_SIZE:10}
+      fixed-delay: ${QUEUE_WORKER_FIXED_DELAY:100}
+      initial-delay: ${QUEUE_WORKER_INITIAL_DELAY:1000}
+      recovery-fixed-delay: ${QUEUE_RECOVERY_FIXED_DELAY:5000}
+      recovery-initial-delay: ${QUEUE_RECOVERY_INITIAL_DELAY:5000}
+      processing-timeout-seconds: ${QUEUE_PROCESSING_TIMEOUT_SECONDS:30}

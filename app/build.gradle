@@ -7,8 +7,10 @@ dependencies {
     implementation project(':inventory')
     implementation project(':purchase')
     implementation project(':payment')
+    implementation project(':queue')
 
     implementation rootProject.libraries.bootDataJpa
+    implementation rootProject.libraries.bootDataRedis
     implementation rootProject.libraries.bootSecurity
     implementation rootProject.libraries.bootValidation
     implementation rootProject.libraries.bootWeb

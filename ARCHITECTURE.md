@@ -5,7 +5,7 @@
 Limited Ticketing은 한정 수량 상품의 판매, 재고 예약, 구매, 결제를 다루는 모듈러 모놀리스다. 현재는 Spring Boot 애플리케이션 하나를 하나의 컨테이너 또는 Pod로 배포한다.
 
 ```text
-member + sale + inventory + purchase + payment
+member + sale + inventory + purchase + payment + queue
                          |
                        app.jar
                          |
@@ -24,7 +24,8 @@ limited-ticketing
 ├── sale         # 상품과 판매
 ├── inventory    # 재고
 ├── purchase     # 구매와 예약
-└── payment      # 결제 시도와 결과
+├── payment      # 결제 시도와 결과
+└── queue        # Redis 대기열과 비동기 예약 처리
 ```
 
 - 루트 `build.gradle`은 Java 버전, BOM, 라이브러리 버전을 관리한다.
@@ -43,6 +44,7 @@ sale      -> shared::vo, shared::exception
 inventory -> shared::exception
 purchase  -> shared::vo, shared::exception, member::api, sale::api, inventory::api
 payment   -> shared::vo, shared::exception, purchase::api, inventory::api
+queue     -> shared::api, shared::exception, member::api, sale::api, purchase::api
 ```
 
 `::vo`, `::api`는 Spring Modulith Named Interface다. 모듈 전체를 공개하지 않고, 필요한 하위 패키지만 공개 계약으로 노출한다. `application.port.in`과 `application.port.in.dto`는 각각 `api`로 선언해 Facade와 계약 DTO를 함께 공개한다.
@@ -97,6 +99,7 @@ message:         클라이언트에 반환할 오류 설명
 | `inventory` | `Inventory` | 가용·예약·판매 수량 전이 |
 | `purchase` | `Purchase`, `PurchaseStatus` | 구매 예약, 취소, 만료, 완료 상태 전이 |
 | `payment` | `Payment`, `PaymentStatus` | 결제 시도 이력과 승인·실패 결과 |
+| `queue` | `ReservationQueueEntry`, `ReservationQueueStatus` | 입장 순서, 동시 처리 슬롯, 비동기 구매 예약 결과 |
 | `shared` | `Money`, `SalePeriod` | 제한된 공통 값 타입 |
 
 모듈 간 관계는 우선 식별자 값으로 표현한다. 예를 들어 `Purchase`는 `memberId`, `saleProductId`를 보관하며 `Member`, `SaleProduct` 객체를 직접 참조하지 않는다.
@@ -195,6 +198,8 @@ HTTP 요청
 
 Facade는 공개 DTO와 내부 Command/Query DTO를 변환하고 Service에 위임한다. 트랜잭션과 비즈니스 규칙은 `*CommandService`, `*QueryService`, Domain에 둔다. `port.out`은 다른 모듈이 호출하는 API가 아니라, Infrastructure가 구현하는 의존성 역전 지점이다.
 
+`presentation`과 `application.port.in.dto`는 Domain의 Aggregate, Repository, enum을 직접 import하지 않는다. 공개 DTO 역시 내부 `application.command`, `application.query`, `application.support`의 DTO를 참조하지 않는다. HTTP 및 모듈 공개 계약에는 primitive, `String`, 시간 타입, `shared.vo`, 또는 별도로 정의한 공개 DTO만 사용한다. 예를 들어 판매 상태는 HTTP와 공개 DTO에서는 `"DRAFT"`, `"OPEN"`, `"CLOSED"` 문자열이고, Facade가 내부 `SaleStatus`로 변환한다. 이 경계는 외부 계약이 Domain 클래스명이나 패키지 구조에 묶이지 않게 한다.
+
 현재 시각처럼 모든 모듈에서 같은 기술적 의미를 갖는 의존성은 모듈별 port로 중복하지 않는다. `app.configuration.time.TimeConfiguration`이 제공하는 JDK `java.time.Clock` Bean을 직접 주입하고, 테스트에서는 `Clock.fixed(...)`로 대체한다. 영업일·정산 마감처럼 도메인별 시간 정책이 생길 때만 해당 도메인의 별도 port를 둔다.
 
 성공 응답은 `ApiResponse.success(data)`로 `code`와 `data`를 통일한다. HTTP 상태 코드는 본문에 중복하지 않는다. 생성 API처럼 `201 Created` 또는 `Location` 헤더가 필요한 경우에는 `ResponseEntity<ApiResponse<T>>`를 사용하고, 기본 `200 OK` 응답은 `ApiResponse<T>`를 직접 반환한다. 본문이 없는 성공 응답은 `ResponseEntity<Void>`와 `204 No Content`를 사용한다. 오류 응답은 `GlobalExceptionHandler`의 `ApiErrorResponse` 계약을 유지한다.
@@ -223,7 +228,7 @@ purchase/infrastructure/persistence/
 
 ## 7. PostgreSQL과 스키마 관리
 
-실행 DB는 PostgreSQL 하나를 사용한다. `app`이 DataSource, Flyway, JPA 설정을 소유하고, 도메인 모듈은 같은 DataSource를 공유한다.
+최종 영속 저장소는 PostgreSQL 하나를 사용한다. `app`이 DataSource, Flyway, JPA 설정을 소유하고, 도메인 모듈은 같은 DataSource를 공유한다. Redis는 대기 순서와 처리 슬롯을 위한 보조 저장소로만 사용한다.
 
 ```text
 app/src/main/resources/
@@ -231,7 +236,8 @@ app/src/main/resources/
 └── db/migration/
     ├── V1__initial_schema.sql       # 초기 스키마
     ├── V2__add_purchase_request_key.sql
-    └── V3__replace_scheduled_sale_status.sql
+    ├── V3__replace_scheduled_sale_status.sql
+    └── V4__add_reservation_queue_entries.sql
 ```
 
 - Flyway migration이 스키마의 유일한 변경 이력이다. 적용된 migration 파일을 수정하지 않고, 변경마다 다음 버전의 새 파일을 추가한다.
@@ -240,8 +246,9 @@ app/src/main/resources/
 - `purchases.active_purchase_key`의 유니크 제약은 활성 구매 상태만 중복을 막기 위한 DB 보호 장치다. PostgreSQL의 UNIQUE 제약은 NULL을 여러 개 허용하므로 만료·취소된 구매는 같은 회원과 판매 상품으로 다시 생성할 수 있다.
 - `purchases.purchase_request_key`는 `member_id`와 함께 유니크하다. 동일 구매 요청의 재시도는 기존 Purchase를 반환하고, 같은 키를 다른 판매 상품에 재사용하면 409로 처리한다.
 - `payments.payment_request_key`는 Payment 생성의 멱등 키다. 같은 키와 같은 Purchase는 기존 Payment를 반환하며, 다른 Purchase에 재사용하면 409로 처리한다. 재시도와 별개인 새 결제 시도에는 새로운 키를 사용한다.
+- `reservation_queue_entries`는 Redis가 유실돼도 대기 요청을 복구하기 위한 영속 레코드다. `WAITING`, `PROCESSING` 상태에만 적용되는 부분 유니크 인덱스로 회원당 같은 판매 상품의 활성 대기열 항목을 하나로 제한한다.
 
-로컬 PostgreSQL은 다음 명령으로 실행한다.
+로컬 PostgreSQL과 Redis는 다음 명령으로 실행한다.
 
 ```bash
 cp .env.example .env
@@ -276,6 +283,7 @@ PurchaseCommandService
 
 1. `ModularityTests`는 `ApplicationModules.verify()`로 금지된 모듈 참조, Named Interface 외부 접근, 순환 의존을 검증한다.
 2. `ModularityDocumentationTests`는 Spring Modulith `Documenter`로 현재 코드에서 모듈 문서를 생성한다.
+3. `LayeringArchitectureTests`는 Domain의 Spring/JPA 의존성, Application의 Infrastructure 구현체 직접 의존, Presentation/Public DTO의 Domain 타입 노출, Public DTO의 내부 Application DTO 의존, Presentation의 Application Service 직접 호출을 검증한다.
 
 ```bash
 ./gradlew test
@@ -384,3 +392,22 @@ POST /api/purchases/{purchaseId}/cancel          # 예약 취소
 - `SaleProductManagementIntegrationTest`는 관리자 헤더, DRAFT 생성, 초기 재고 생성, 판매 기간 변경, OPEN/CLOSED 전이와 공개 목록·상세 조회를 검증한다.
 - 구매·결제 멱등성 테스트는 동일 요청 키의 동시 재시도가 하나의 Purchase 또는 Payment만 만들고 기존 결과를 반환하는지 검증한다.
 - `ModularityTests`는 `payment -> purchase/inventory` 의존이 각 모듈의 `api` Named Interface로만 향하는지 검증한다.
+
+## 14. Redis 대기열과 비동기 예약
+
+판매 오픈 직후의 요청을 즉시 모두 PostgreSQL 재고 행으로 보내지 않기 위해, 대기열은 Redis Sorted Set(ZSET)으로 순서를 관리한다. 판매 상품별 `waiting` ZSET은 입장 순서, `processing` ZSET은 현재 처리 중인 요청과 시작 시각을 가진다. Lua 스크립트가 빈 처리 슬롯만큼만 `waiting`에서 `processing`으로 원자적으로 이동시킨다.
+
+```text
+POST /api/sale-products/{saleProductId}/queue-entries
+  -> reservation_queue_entries(WAITING) 저장
+  -> 커밋 후 Redis waiting ZSET 등록
+  -> Worker가 처리 슬롯만큼 claim
+  -> 기존 PurchaseCommandFacade.reserve()
+  -> RESERVED 또는 SOLD_OUT 기록
+```
+
+대기열은 구매의 최종 정합성 경계가 아니다. `PurchaseCommandService`의 구매 멱등성·활성 구매 제약과 `Inventory`의 조건부 원자 갱신이 여전히 최종 보호 장치다. Redis는 유입 제어와 처리 순서를 담당하고, DB의 `WAITING` 레코드는 Redis 장애 또는 커밋 직후 반영 실패 시 복구 스케줄러가 다시 ZSET에 적재한다.
+
+현재 직접 구매 API는 성능 기준선 비교를 위해 유지한다. 대기열 API는 `202 Accepted`와 `Location: /api/queue-entries/{queueEntryId}`를 반환하며, 클라이언트는 상태 조회 API로 `WAITING`, `PROCESSING`, `RESERVED`, `SOLD_OUT`, `FAILED`를 확인한다. SSE/WebSocket 알림, 다중 인스턴스 리더 선출, Redis Streams/Kafka는 실제 부하 결과와 운영 요구가 생긴 뒤에 추가한다. 상세 선택 근거와 단계별 검증 항목은 [WAITING_ROOM_SPEC.md](WAITING_ROOM_SPEC.md)에 기록한다.
+
+- `ReservationQueueIntegrationTest`는 PostgreSQL과 Redis Testcontainers에서 요청 키 재시도, 활성 대기열 중복 차단, 재고 1건에 대한 `RESERVED`/`SOLD_OUT` 전이를 검증한다.

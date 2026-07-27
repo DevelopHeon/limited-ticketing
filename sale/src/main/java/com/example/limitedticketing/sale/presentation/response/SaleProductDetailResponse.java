@@ -1,7 +1,6 @@
 package com.example.limitedticketing.sale.presentation.response;
 
 import com.example.limitedticketing.sale.application.port.in.dto.SaleProductDetail;
-import com.example.limitedticketing.sale.domain.model.SaleStatus;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
@@ -12,7 +11,7 @@ public record SaleProductDetailResponse(
     BigDecimal salePrice,
     LocalDateTime saleStartsAt,
     LocalDateTime saleEndsAt,
-    SaleStatus status
+    String status
 ) {
 
     public static SaleProductDetailResponse from(SaleProductDetail detail) {

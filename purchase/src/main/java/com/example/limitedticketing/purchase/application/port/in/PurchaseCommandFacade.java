@@ -23,7 +23,7 @@ public class PurchaseCommandFacade {
             new ReservePurchaseCommand(input.memberId(), input.saleProductId(), input.purchaseRequestKey())
         );
 
-        return new PurchaseReservation(result.purchaseId(), result.status(), result.expiresAt());
+        return PurchaseReservation.of(result.purchaseId(), result.status().name(), result.expiresAt());
     }
 
     public void cancel(CancelPurchaseInput input) {

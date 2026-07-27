@@ -5,8 +5,6 @@ import com.example.limitedticketing.sale.application.port.in.dto.FindSaleProduct
 import com.example.limitedticketing.sale.application.port.in.dto.FindSaleProductsInput;
 import com.example.limitedticketing.sale.application.port.in.dto.SaleProductDetail;
 import com.example.limitedticketing.sale.application.port.in.dto.SaleProductPage;
-import com.example.limitedticketing.sale.domain.exception.SaleException;
-import com.example.limitedticketing.sale.domain.model.SaleStatus;
 import com.example.limitedticketing.sale.presentation.response.SaleProductDetailResponse;
 import com.example.limitedticketing.sale.presentation.response.SaleProductPageResponse;
 import com.example.limitedticketing.shared.api.ApiResponse;
@@ -31,12 +29,12 @@ public class SaleProductQueryController {
 
     @GetMapping
     public ApiResponse<SaleProductPageResponse> findPage(
-        @RequestParam(name = "status", required = false) SaleStatus status,
+        @RequestParam(name = "status", required = false) String status,
         @PageableDefault(size = 20, sort = "saleStartsAt", direction = Sort.Direction.ASC) Pageable pageable
     ) {
         Sort.Order order = pageable.getSort().stream()
             .findFirst()
-            .orElseThrow(() -> SaleException.invalid("A sort property is required"));
+            .orElse(new Sort.Order(Sort.Direction.ASC, "saleStartsAt"));
         SaleProductPage saleProductPage = saleProductQueryFacade.findPage(
             new FindSaleProductsInput(
                 status,

@@ -1,7 +1,5 @@
 package com.example.limitedticketing.sale.application.port.in.dto;
 
-import com.example.limitedticketing.sale.application.query.dto.SaleProductSummaryResult;
-import com.example.limitedticketing.sale.domain.model.SaleStatus;
 import com.example.limitedticketing.shared.vo.Money;
 import java.time.LocalDateTime;
 
@@ -11,17 +9,24 @@ public record SaleProductSummary(
     Money salePrice,
     LocalDateTime saleStartsAt,
     LocalDateTime saleEndsAt,
-    SaleStatus status
+    String status
 ) {
 
-    public static SaleProductSummary from(SaleProductSummaryResult result) {
+    public static SaleProductSummary of(
+        Long saleProductId,
+        String productName,
+        Money salePrice,
+        LocalDateTime saleStartsAt,
+        LocalDateTime saleEndsAt,
+        String status
+    ) {
         return new SaleProductSummary(
-            result.saleProductId(),
-            result.productName(),
-            result.salePrice(),
-            result.saleStartsAt(),
-            result.saleEndsAt(),
-            result.status()
+            saleProductId,
+            productName,
+            salePrice,
+            saleStartsAt,
+            saleEndsAt,
+            status
         );
     }
 }

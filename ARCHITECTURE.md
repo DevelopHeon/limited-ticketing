@@ -1,64 +1,80 @@
 # Limited Ticketing 아키텍처
 
-## 1. 목표와 배포 단위
+## 1. 시스템 개요
 
-Limited Ticketing은 한정 수량 상품의 판매, 재고 예약, 구매, 결제를 다루는 모듈러 모놀리스다. 현재는 Spring Boot 애플리케이션 하나를 하나의 컨테이너 또는 Pod로 배포한다.
+Limited Ticketing은 한정 수량 상품의 판매, 재고 예약, 구매, 결제 시도와 대기열 진입을 다루는 **모듈러 모놀리스**다. 현재 모든 모듈은 하나의 Spring Boot 애플리케이션으로 실행하고 하나의 컨테이너 또는 Pod로 배포한다.
 
 ```text
 member + sale + inventory + purchase + payment + queue
-                         |
-                       app.jar
-                         |
-              컨테이너 또는 Pod 하나
+                            |
+                         app.jar
+                            |
+                   Container 또는 Pod 하나
 ```
 
-Gradle 하위 프로젝트와 Spring Modulith 애플리케이션 모듈은 서비스 분리나 배포 분리를 의미하지 않는다. 독립 배포가 필요한 근거가 생기기 전까지는 같은 프로세스 안에서 모듈 경계만 강제한다.
+Gradle 하위 프로젝트와 Spring Modulith 애플리케이션 모듈은 배포 단위가 아니다. 모듈은 코드 소유권과 의존 방향을 강제하기 위한 경계이며, 독립 배포가 필요한 근거가 생길 때만 서비스 분리를 검토한다.
 
-## 2. 프로젝트 구성
+### 핵심 원칙
+
+- PostgreSQL은 구매, 재고, 대기열 상태의 최종 정합성 기준이다.
+- Redis는 대기 순서와 처리 슬롯을 제어하는 보조 저장소다. 재고 수량과 구매 확정 상태를 Redis에 두지 않는다.
+- 각 도메인은 자기 모델과 Repository를 소유한다. 다른 도메인은 공개 Facade와 DTO만 사용한다.
+- HTTP 계약, 모듈 공개 계약, 내부 유스케이스 DTO를 분리한다.
+- 비동기 처리로 바꿔도 구매 멱등성 및 재고의 조건부 원자 갱신을 최종 보호 장치로 유지한다.
+
+## 2. 프로젝트와 모듈 구성
 
 ```text
 limited-ticketing
-├── app          # Spring Boot 실행, HTTP, Security, DB 구성, 테스트
-├── shared       # 제한된 공통 값 타입과 예외 분류 계약
-├── member       # 회원
-├── sale         # 상품과 판매
-├── inventory    # 재고
-├── purchase     # 구매와 예약
-├── payment      # 결제 시도와 결과
-└── queue        # Redis 대기열과 비동기 예약 처리
+├── app          # Spring Boot 조립, 환경 설정, 전역 HTTP/보안 처리, 통합 테스트
+├── shared       # 제한된 공통 값 타입, 공통 예외, 공통 API 응답 계약
+├── member       # 회원과 구매 가능 상태
+├── sale         # 상품, 판매 기간, 판매 상태
+├── inventory    # 가용/예약/판매 재고 전이
+├── purchase     # 구매 예약, 취소, 만료, 구매 완료
+├── payment      # 결제 시도 이력과 승인/실패
+└── queue        # Redis 대기열, 비동기 예약 처리와 상태 조회
 ```
 
-- 루트 `build.gradle`은 Java 버전, BOM, 라이브러리 버전을 관리한다.
-- 각 하위 모듈은 필요한 라이브러리와 `project(':module')` 의존성만 선언한다.
-- `app`만 Spring Boot 플러그인과 실행 구성을 가진다. 다른 모듈은 기능 코드와 영속성 어댑터를 제공한다.
-- `app`의 `configuration`과 `presentation.exception`은 웹·보안·DB 같은 애플리케이션 조립 책임을 가진다. 도메인 규칙을 공통 설정 패키지에 두지 않는다.
+| 모듈 | 주요 모델 | 책임 | 공개 API를 사용하는 모듈 |
+|---|---|---|---|
+| `shared` | `Money`, `SalePeriod`, `DomainException`, `ApiResponse` | 전 모듈에서 동일한 의미를 갖는 계약 | 전체 |
+| `member` | `Member`, `MemberStatus` | 회원 식별, 구매 가능 여부 | `purchase`, `queue` |
+| `sale` | `Product`, `SaleProduct`, `SaleStatus` | 판매 상품, 기간, 판매 상태와 구매 가능 여부 | `purchase`, `queue` |
+| `inventory` | `Inventory` | 가용, 예약, 판매 수량의 원자적 전이 | `sale`, `purchase`, `payment` |
+| `purchase` | `Purchase`, `PurchaseStatus` | 구매 예약, 취소, 만료, 완료와 구매 멱등성 | `payment`, `queue` |
+| `payment` | `Payment`, `PaymentStatus` | 결제 시도 이력과 승인/실패 처리 | HTTP API |
+| `queue` | `ReservationQueueEntry`, `ReservationQueueStatus` | 대기 순번, 처리 상태, 비동기 예약 결과 | HTTP API |
+| `app` | - | 실행 모듈, DataSource/Flyway/Redis/Security/전역 예외 조립 | 전체 |
+
+모듈 간 Aggregate 참조는 객체 그래프가 아니라 식별자로 표현한다. 예를 들어 `Purchase`는 `memberId`, `saleProductId`만 보관하며 `Member`, `SaleProduct` 엔티티를 직접 참조하지 않는다.
 
 ## 3. 모듈 경계와 의존 규칙
 
-Gradle 의존성은 **컴파일 가능 여부**를, Spring Modulith의 `@ApplicationModule`은 **허용된 애플리케이션 모듈 방향**을 검증한다. 둘 다 만족해야 다른 모듈 타입을 사용할 수 있다.
+Gradle 의존성은 컴파일 가능 여부를, Spring Modulith의 `@ApplicationModule`은 허용된 모듈 참조 방향을 검증한다. 두 규칙을 모두 만족해야 다른 모듈의 타입을 사용할 수 있다.
 
 ```text
 shared    -> 없음
 member    -> shared::exception
-sale      -> shared::vo, shared::exception
+sale      -> shared::vo, shared::exception, shared::api, inventory::api
 inventory -> shared::exception
-purchase  -> shared::vo, shared::exception, member::api, sale::api, inventory::api
-payment   -> shared::vo, shared::exception, purchase::api, inventory::api
-queue     -> shared::api, shared::exception, member::api, sale::api, purchase::api
+purchase  -> shared::vo, shared::exception, shared::api,
+             member::api, sale::api, inventory::api
+payment   -> shared::vo, shared::exception, shared::api,
+             purchase::api, inventory::api
+queue     -> shared::api, shared::exception,
+             member::api, sale::api, purchase::api
 ```
 
-`::vo`, `::api`는 Spring Modulith Named Interface다. 모듈 전체를 공개하지 않고, 필요한 하위 패키지만 공개 계약으로 노출한다. `application.port.in`과 `application.port.in.dto`는 각각 `api`로 선언해 Facade와 계약 DTO를 함께 공개한다.
+`::api`, `::vo`, `::exception`, `::events`는 Spring Modulith Named Interface다. 모듈 전체가 아니라 필요한 공개 패키지만 노출한다.
 
 ```java
-@ApplicationModule(
-    allowedDependencies = {
-        "shared::vo",
-        "member::api",
-        "sale::api",
-        "inventory::api",
-        "payment::api"
-    }
-)
+@ApplicationModule(allowedDependencies = {
+    "shared::vo",
+    "member::api",
+    "sale::api",
+    "inventory::api"
+})
 package com.example.limitedticketing.purchase;
 ```
 
@@ -67,115 +83,59 @@ package com.example.limitedticketing.purchase;
 package com.example.limitedticketing.member.application.port.in;
 ```
 
-다른 모듈을 호출해야 할 때는 다음 규칙을 지킨다.
+다른 모듈을 호출할 때는 대상 모듈의 `application.port.in` Facade와 `application.port.in.dto`만 참조한다. 대상 모듈의 Domain 모델, JPA Entity, Spring Data Repository, 내부 Command/Query Service는 직접 참조하지 않는다.
 
-1. 대상 모듈의 `application.port.in`에 Facade와 계약 DTO를 둔다.
-2. 대상의 `api` Named Interface만 참조한다. `domain`, `infrastructure`, JPA Entity, Spring Data Repository를 직접 참조하지 않는다.
-3. 호출 모듈의 Gradle 의존성과 `@ApplicationModule(allowedDependencies = ...)`를 함께 추가한다.
-4. 즉시 응답이 필요하지 않은 후속 작업은 동기 호출보다 이벤트를 우선 검토한다.
+## 4. 레이어 구조
 
-`shared`에는 모든 모듈에서 같은 의미를 갖는 값 타입, 공통 예외 분류, 공통 HTTP 응답 계약만 둔다. Aggregate, 기능별 API DTO, Repository, 이벤트, 웹/보안 설정은 `shared`에 두지 않는다. 현재 `shared.vo`, `shared.exception`, `shared.api`가 각각 Named Interface로 공개된다.
-
-### 예외 처리 규칙
-
-각 모듈은 `PurchaseException`, `PaymentException`, `InventoryException`처럼 도메인별 예외를 던진다. 일반적인 `IllegalArgumentException`, `IllegalStateException`, `NoSuchElementException`으로 HTTP 오류를 표현하지 않는다.
-
-도메인 예외는 `shared.exception.DomainException`을 상속하고 다음 정보를 가진다.
-
-```text
-DomainErrorType: INVALID_REQUEST | NOT_FOUND | CONFLICT | FORBIDDEN
-code:            PURCHASE_NOT_FOUND, INSUFFICIENT_INVENTORY 등
-message:         클라이언트에 반환할 오류 설명
-```
-
-`app`의 `GlobalExceptionHandler`는 이 공통 계약을 HTTP 상태와 `ApiErrorResponse`로 변환한다. DB 유니크 제약 같은 `DataIntegrityViolationException`은 별도로 409로 처리한다. 트랜잭션 없이 이벤트를 발행하는 등 내부 구현 오류는 일반 예외로 남겨 500으로 처리한다.
-
-## 4. 모듈별 책임
-
-| 모듈 | 주요 모델 | 책임 |
-|---|---|---|
-| `member` | `Member`, `MemberStatus` | 회원 식별과 구매 가능 상태 |
-| `sale` | `Product`, `SaleProduct`, `SaleStatus` | 상품 정보, 판매 기간, 판매 조건 |
-| `inventory` | `Inventory` | 가용·예약·판매 수량 전이 |
-| `purchase` | `Purchase`, `PurchaseStatus` | 구매 예약, 취소, 만료, 완료 상태 전이 |
-| `payment` | `Payment`, `PaymentStatus` | 결제 시도 이력과 승인·실패 결과 |
-| `queue` | `ReservationQueueEntry`, `ReservationQueueStatus` | 입장 순서, 동시 처리 슬롯, 비동기 구매 예약 결과 |
-| `shared` | `Money`, `SalePeriod` | 제한된 공통 값 타입 |
-
-모듈 간 관계는 우선 식별자 값으로 표현한다. 예를 들어 `Purchase`는 `memberId`, `saleProductId`를 보관하며 `Member`, `SaleProduct` 객체를 직접 참조하지 않는다.
-
-## 5. 도메인 모듈 패키지 구조
-
-필요한 코드가 생길 때만 패키지를 추가한다. 아래는 `purchase` 기능이 구현된 상태를 가정한 목표 구조다.
+모든 도메인 모듈은 아래 구조를 기본으로 사용한다. 필요한 코드가 없으면 패키지를 미리 만들지 않는다.
 
 ```text
 purchase
-├── presentation                              # HTTP 어댑터
+├── presentation                         # HTTP 어댑터
 │   ├── controller
-│   │   └── PurchaseController
 │   ├── request
-│   │   ├── CancelPurchaseRequest
-│   │   └── ReservePurchaseRequest
 │   └── response
-│       ├── PurchaseResponse
-│       └── PurchaseReservationResponse
-│
-├── application                               # 유스케이스와 트랜잭션 경계
-│   ├── command                               # 상태 변경
+├── application                          # 유스케이스와 트랜잭션 경계
+│   ├── command
 │   │   ├── dto
-│   │   │   ├── CancelPurchaseCommand
-│   │   │   └── ReservePurchaseCommand
 │   │   └── service
-│   │       └── PurchaseCommandService
-│   ├── query                                 # 상태 비변경 조회
+│   ├── query
 │   │   ├── dto
-│   │   │   ├── FindPurchaseQuery
-│   │   │   └── PurchaseDetailResult
 │   │   └── service
-│   │       └── PurchaseQueryService
+│   ├── support                           # Finder 등 유스케이스 공통 보조 객체
 │   └── port
-│       ├── in                                # 모듈 외부 공개 계약
-│       │   ├── PurchaseCommandFacade
-│       │   ├── PurchaseQueryFacade
+│       ├── in                            # 다른 모듈/Controller에 공개하는 Facade
 │       │   └── dto
-│       │       ├── FindPurchaseInput
-│       │       ├── PurchaseSummary
-│       │       └── ReservePurchaseInput
-│       └── out                               # 외부 기술 의존 계약
-│           └── PurchaseEventPublisher
-│
-├── domain                                    # 순수 비즈니스 규칙
+│       └── out                           # 인프라에 요구하는 기술 중립 계약
+├── domain                               # 순수 비즈니스 규칙
 │   ├── event
-│   │   └── PurchaseReserved
+│   ├── exception
 │   ├── model
-│   │   ├── Purchase
-│   │   └── PurchaseStatus
 │   └── repository
-│       └── PurchaseRepository
-│
-└── infrastructure                            # 기술 구현체
+└── infrastructure                       # JPA, Redis, Spring Event 등의 구현체
+    ├── configuration
     ├── messaging
-    │   └── SpringPurchaseEventPublisher
-    └── persistence
-        ├── entity
-        │   └── PurchaseJpaEntity
-        ├── repository
-        │   └── JpaPurchaseRepository
-        └── PurchaseRepositoryAdapter
+    ├── persistence
+    │   ├── entity
+    │   └── repository
+    └── redis
 ```
 
-### DTO와 호출 경계
+### 레이어 책임
 
-| 위치 | 역할 | 이름 규칙 |
+| 레이어 | 책임 | 허용되는 의존성 |
 |---|---|---|
-| `presentation.request` | HTTP 입력과 Bean Validation | `*Request` |
-| `presentation.response` | HTTP 응답 JSON | `*Response` |
-| `shared.api` | 성공 HTTP 응답 외피 | `ApiResponse<T>` |
-| `application.command.dto` | 상태 변경 유스케이스 입력/결과 | `*Command`, `*Result` |
-| `application.query.dto` | 조회 유스케이스 입력/결과 | `*Query`, `*Result` |
-| `application.port.in` | Controller와 다른 모듈이 호출하는 공개 진입점 | `*Facade` |
-| `application.port.in.dto` | 공개 Facade 계약 | `*Input`, `*Summary` 등 의미 중심 이름 |
-| `application.port.out` | Application Service가 인프라에 요구하는 계약 | 기술 중립적인 Port 이름 |
+| `presentation` | HTTP 바인딩, 인증 주체 추출, HTTP 응답 생성 | 공개 `port.in`과 HTTP DTO |
+| `application.command` | 상태 변경 유스케이스, 트랜잭션, 도메인 조율 | Domain, 다른 모듈의 공개 API, `port.out` |
+| `application.query` | 상태를 바꾸지 않는 조회 유스케이스 | Domain Repository, 조회용 `port.out` |
+| `application.port.in` | 모듈 외부 진입점, 공개 DTO와 내부 DTO 변환 | 내부 Application Service |
+| `application.port.out` | DB 외 기술에 대한 요구 계약 | 기술 중립 인터페이스만 선언 |
+| `domain` | 상태 전이, 불변식, 도메인 예외, Repository 추상화 | Java와 `shared`의 의미 있는 값 타입 |
+| `infrastructure` | JPA, Spring Data, Redis, Spring Event, Scheduler 구현 | Domain Repository 및 `port.out` 구현 |
+
+Domain에는 Spring, JPA, Hibernate 어노테이션을 두지 않는다. JPA 매핑은 `infrastructure.persistence.entity`의 `*JpaEntity`가 소유하고, `*RepositoryAdapter`가 JPA Entity와 Domain 모델을 변환하면서 Domain Repository를 구현한다.
+
+### 호출 흐름
 
 ```text
 HTTP 요청
@@ -184,6 +144,8 @@ HTTP 요청
   -> application.port.in.*Facade
   -> application.command/query.dto
   -> application.command/query.service
+  -> domain model / domain repository
+  -> infrastructure adapter / JPA entity
   -> presentation.response
 
 다른 모듈 호출
@@ -191,223 +153,269 @@ HTTP 요청
   -> 대상 모듈 application.port.in.*Facade
 
 외부 기술 호출
-  -> application.command/query.service
+  -> application service
   -> application.port.out
   -> infrastructure 구현체
 ```
 
-Facade는 공개 DTO와 내부 Command/Query DTO를 변환하고 Service에 위임한다. 트랜잭션과 비즈니스 규칙은 `*CommandService`, `*QueryService`, Domain에 둔다. `port.out`은 다른 모듈이 호출하는 API가 아니라, Infrastructure가 구현하는 의존성 역전 지점이다.
+`Facade`는 공개 계약을 내부 Command/Query로 변환하고 Service에 위임한다. 비즈니스 규칙과 트랜잭션은 Facade가 아니라 Application Service와 Domain에 둔다. `port.out`은 다른 모듈에서 호출하는 API가 아니라, Application이 인프라 구현에 의존하지 않게 하는 출력 포트다.
 
-`presentation`과 `application.port.in.dto`는 Domain의 Aggregate, Repository, enum을 직접 import하지 않는다. 공개 DTO 역시 내부 `application.command`, `application.query`, `application.support`의 DTO를 참조하지 않는다. HTTP 및 모듈 공개 계약에는 primitive, `String`, 시간 타입, `shared.vo`, 또는 별도로 정의한 공개 DTO만 사용한다. 예를 들어 판매 상태는 HTTP와 공개 DTO에서는 `"DRAFT"`, `"OPEN"`, `"CLOSED"` 문자열이고, Facade가 내부 `SaleStatus`로 변환한다. 이 경계는 외부 계약이 Domain 클래스명이나 패키지 구조에 묶이지 않게 한다.
+## 5. DTO, 예외, 시간 규칙
 
-현재 시각처럼 모든 모듈에서 같은 기술적 의미를 갖는 의존성은 모듈별 port로 중복하지 않는다. `app.configuration.time.TimeConfiguration`이 제공하는 JDK `java.time.Clock` Bean을 직접 주입하고, 테스트에서는 `Clock.fixed(...)`로 대체한다. 영업일·정산 마감처럼 도메인별 시간 정책이 생길 때만 해당 도메인의 별도 port를 둔다.
+### DTO 경계
 
-성공 응답은 `ApiResponse.success(data)`로 `code`와 `data`를 통일한다. HTTP 상태 코드는 본문에 중복하지 않는다. 생성 API처럼 `201 Created` 또는 `Location` 헤더가 필요한 경우에는 `ResponseEntity<ApiResponse<T>>`를 사용하고, 기본 `200 OK` 응답은 `ApiResponse<T>`를 직접 반환한다. 본문이 없는 성공 응답은 `ResponseEntity<Void>`와 `204 No Content`를 사용한다. 오류 응답은 `GlobalExceptionHandler`의 `ApiErrorResponse` 계약을 유지한다.
+| 위치 | 역할 | 이름 예시 |
+|---|---|---|
+| `presentation.request` | HTTP 입력 및 Bean Validation | `ReservePurchaseRequest` |
+| `presentation.response` | HTTP JSON 응답 | `PurchaseReservationResponse` |
+| `shared.api` | 성공 응답 외피 | `ApiResponse<T>` |
+| `application.command.dto` | 내부 상태 변경 입력/결과 | `ReservePurchaseCommand`, `PurchaseReservationResult` |
+| `application.query.dto` | 내부 조회 입력/결과 | `FindPurchaseQuery`, `PurchaseDetailResult` |
+| `application.port.in.dto` | 모듈 공개 Facade 계약 | `ReservePurchaseInput`, `PurchaseReservation` |
+| `application.port.out` | 외부 기술 호출 계약 | `PurchaseEventPublisher`, `ReservationQueueStore` |
 
-### 조회와 DTO 생성 규칙
+`presentation`과 `application.port.in.dto`는 Domain Aggregate, Repository, Domain enum, 내부 Command/Query/Support DTO를 직접 import하지 않는다. 공개 상태값은 `String` 또는 공개 계약 enum으로 표현하고, Facade에서 Domain enum으로 변환한다.
 
-- Aggregate를 식별자로 조회하고 없으면 도메인 예외를 던지는 규칙은 `application.support.*Finder`에 둔다. Command/Query Service는 `Finder`를 주입받아 사용하며, 각 Service에 `getXxx`, `findRequiredXxx` private 메서드로 중복하지 않는다.
-- 한 객체를 다른 DTO/Result로 단순 변환하는 생성 책임은 대상 DTO/Result에 둔다. 원본 객체가 있으면 `from(source)`, 필요한 값을 직접 조합하면 `of(...)` 정적 팩토리를 사용한다.
-- Facade와 Service에는 `toXxx`, `resultOf`처럼 DTO를 단순 생성하는 private 변환 메서드를 두지 않는다. 검증, 여러 소스의 조합, 호출 순서 제어는 해당 계층에 남긴다.
+단순 DTO 변환은 대상 DTO의 `from(source)` 또는 `of(...)` 정적 팩토리에 둔다. Aggregate를 필수 조회하는 공통 규칙은 `application.support.*Finder`로 분리하며, 각 Service에 같은 `findById(...).orElseThrow(...)`를 반복하지 않는다.
 
-## 6. 도메인과 영속성 분리
+### 예외와 HTTP 응답
 
-도메인 모델은 순수 Java다. JPA, Spring Data, Spring stereotype을 import하지 않는다.
+각 도메인은 `PurchaseException`, `PaymentException`, `InventoryException`처럼 도메인별 예외를 던진다. 이 예외는 `shared.exception.DomainException`을 상속하며 `INVALID_REQUEST`, `NOT_FOUND`, `CONFLICT`, `FORBIDDEN` 분류와 오류 코드를 가진다.
+
+`app`의 `GlobalExceptionHandler`가 이를 HTTP 상태와 `ApiErrorResponse`로 변환한다. 성공 응답은 `ApiResponse.success(data)`를 기본으로 사용한다. 생성 API처럼 `201 Created` 또는 `202 Accepted`와 `Location` 헤더가 필요한 경우에는 `ResponseEntity<ApiResponse<T>>`를 사용한다.
+
+### 시간
+
+기술적으로 동일한 현재 시각은 `app.configuration.time.TimeConfiguration`이 제공하는 JDK `Clock` Bean을 주입받아 사용한다. 테스트는 `Clock.fixed(...)`로 시간을 고정한다. 영업일, 정산 마감처럼 도메인별 시간 정책이 생길 때만 별도 Port를 만든다.
+
+## 6. 영속성, 정합성, 이벤트
+
+### PostgreSQL과 Flyway
+
+PostgreSQL이 최종 영속 저장소다. `app`이 DataSource, Flyway, JPA 설정을 소유하고 모든 도메인 모듈은 같은 DataSource를 공유한다.
+
+- Flyway migration이 스키마 변경의 유일한 이력이다.
+- 적용된 migration 파일은 수정하지 않고 변경마다 다음 버전의 SQL 파일을 추가한다.
+- Hibernate는 `ddl-auto: validate`로 Entity와 스키마의 불일치만 검증한다.
+- H2 대신 Testcontainers PostgreSQL로 통합 테스트를 수행한다.
+
+구매와 결제의 멱등성은 DB 유니크 제약과 기존 행 재조회로 보장한다.
 
 ```text
-purchase/domain/model/Purchase.java
-purchase/domain/repository/PurchaseRepository.java
-
-purchase/infrastructure/persistence/
-├── entity/PurchaseJpaEntity.java
-├── repository/JpaPurchaseRepository.java
-└── PurchaseRepositoryAdapter.java
+purchases(member_id, purchase_request_key)  # 동일 구매 요청 재시도
+payments(payment_request_key)                # 동일 결제 시도 재시도
+reservation_queue_entries(member_id, purchase_request_key)
+                                                # 동일 대기열 진입 재시도
 ```
 
-`*JpaEntity`는 테이블/컬럼/인덱스/유니크 제약/JPA 생성 전략을 소유한다. `RepositoryAdapter`가 도메인 Repository를 구현하고, Entity와 Domain의 변환을 담당한다. JPA Entity와 Spring Data Repository는 해당 모듈의 `infrastructure` 밖으로 노출하지 않는다.
+활성 구매와 활성 대기열 항목은 별도 제약으로 막는다. 구매는 `active_purchase_key`를 사용하고, 대기열은 `WAITING`, `PROCESSING` 상태에만 적용되는 `(member_id, sale_product_id)` 부분 유니크 인덱스를 사용한다.
 
-## 7. PostgreSQL과 스키마 관리
+재고 예약은 조회 후 저장 방식이 아니라 조건부 원자 UPDATE로 수행한다. `available_quantity >= 요청 수량`일 때만 `available`을 줄이고 `reserved`를 늘린다. 영향 행 수가 0이면 재고 부족으로 처리하므로 동시 요청에서도 음수 재고와 유실 갱신을 방지한다.
 
-최종 영속 저장소는 PostgreSQL 하나를 사용한다. `app`이 DataSource, Flyway, JPA 설정을 소유하고, 도메인 모듈은 같은 DataSource를 공유한다. Redis는 대기 순서와 처리 슬롯을 위한 보조 저장소로만 사용한다.
+### 도메인 이벤트
+
+상태 변경 후 같은 프로세스 안에서 후속 작업을 수행할 때 Spring Modulith 이벤트를 사용한다. `purchase.domain.event`는 `events` Named Interface로 공개된다.
 
 ```text
-app/src/main/resources/
-├── application.yml                 # 환경 변수 기반 PostgreSQL 연결 설정
-└── db/migration/
-    ├── V1__initial_schema.sql       # 초기 스키마
-    ├── V2__add_purchase_request_key.sql
-    ├── V3__replace_scheduled_sale_status.sql
-    └── V4__add_reservation_queue_entries.sql
+Aggregate 상태 변경
+  -> Application Service가 저장
+  -> 트랜잭션 커밋 후 Spring 이벤트 발행
+  -> 다른 모듈의 구독 처리
 ```
 
-- Flyway migration이 스키마의 유일한 변경 이력이다. 적용된 migration 파일을 수정하지 않고, 변경마다 다음 버전의 새 파일을 추가한다.
-- Hibernate는 `ddl-auto: validate`로 Entity와 실제 스키마의 불일치만 검증한다. `create`, `create-drop`, `update`는 사용하지 않는다.
-- 신규 테이블, 컬럼, 인덱스, 유니크 제약은 해당 JPA Entity 변경과 같은 작업에서 Flyway migration으로 추가한다.
-- `purchases.active_purchase_key`의 유니크 제약은 활성 구매 상태만 중복을 막기 위한 DB 보호 장치다. PostgreSQL의 UNIQUE 제약은 NULL을 여러 개 허용하므로 만료·취소된 구매는 같은 회원과 판매 상품으로 다시 생성할 수 있다.
-- `purchases.purchase_request_key`는 `member_id`와 함께 유니크하다. 동일 구매 요청의 재시도는 기존 Purchase를 반환하고, 같은 키를 다른 판매 상품에 재사용하면 409로 처리한다.
-- `payments.payment_request_key`는 Payment 생성의 멱등 키다. 같은 키와 같은 Purchase는 기존 Payment를 반환하며, 다른 Purchase에 재사용하면 409로 처리한다. 재시도와 별개인 새 결제 시도에는 새로운 키를 사용한다.
-- `reservation_queue_entries`는 Redis가 유실돼도 대기 요청을 복구하기 위한 영속 레코드다. `WAITING`, `PROCESSING` 상태에만 적용되는 부분 유니크 인덱스로 회원당 같은 판매 상품의 활성 대기열 항목을 하나로 제한한다.
+프로세스 내부 이벤트는 외부 메시지 브로커가 아니다. 프로세스 종료에도 반드시 전달되어야 하는 이벤트, 소비자 독립 확장, 재시도와 모니터링이 필요해지면 Transactional Outbox와 Kafka를 별도 단계로 도입한다.
 
-로컬 PostgreSQL과 Redis는 다음 명령으로 실행한다.
+## 7. Redis ZSET 대기열
+
+### 목적과 경계
+
+판매 오픈 직후 모든 요청을 PostgreSQL 재고 행으로 바로 보내지 않기 위해 Redis Sorted Set(ZSET)으로 상품별 대기 순서와 처리 중 요청 수를 제어한다.
+
+- Redis: 순번, 대기열 위치, 처리 슬롯
+- PostgreSQL: 대기열 항목의 영속 상태, 멱등성, 구매/재고의 최종 정합성
+- Purchase/Inventory: 실제 구매 예약과 재고 차감의 최종 보호 장치
+
+직접 예약 API는 성능 기준선 비교를 위해 유지한다. 대기열 API를 호출한 요청만 ZSET 대기열을 거쳐 비동기 예약된다.
+
+```text
+직접 예약
+POST /api/sale-products/{saleProductId}/purchases
+  -> PurchaseCommandFacade.reserve()
+  -> 즉시 구매/재고 DB 처리
+
+대기열 예약
+POST /api/sale-products/{saleProductId}/queue-entries
+  -> QueueEntry 생성
+  -> Redis 대기열 진입
+  -> 백그라운드 Worker가 순번대로 구매 예약 처리
+```
+
+`queue-entries`는 Redis라는 구현 기술을 드러내는 이름이 아니라, 사용자가 생성하는 **대기열 항목**이라는 도메인 개념이다. Redis를 Kafka나 Redis Streams로 바꿔도 `ReservationQueueEntry`의 상태 조회와 멱등성 계약은 유지한다.
+
+### Redis 키와 DB 상태
+
+```text
+waiting:sale:{saleProductId}      # ZSET, score=queueSequence, member=queueEntryId
+processing:sale:{saleProductId}   # ZSET, score=claim timestamp, member=queueEntryId
+sequence:sale:{saleProductId}     # String, Redis INCR로 순번 생성
+```
+
+```text
+reservation_queue_entries
+- id (UUID)
+- member_id
+- sale_product_id
+- purchase_request_key
+- queue_sequence
+- status: WAITING | PROCESSING | RESERVED | SOLD_OUT | FAILED
+- purchase_id, failure_code
+- created_at, processing_started_at, completed_at
+```
+
+UUID는 DB 저장 전에도 Redis member와 DB 행에서 동일한 식별자가 필요하므로 사용한다. 대기 순번은 서버 시간이 아니라 Redis `INCR` 값으로 만든다. 같은 밀리초의 요청에도 순서를 부여할 수 있다.
+
+### 처리 흐름
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant API as Queue Controller/Facade
+    participant DB as PostgreSQL
+    participant R as Redis ZSET
+    participant W as ReservationQueueWorker
+    participant P as Purchase/Inventory
+
+    C->>API: POST queue-entries
+    API->>DB: 동일 memberId + requestKey 조회
+    alt 기존 요청
+        DB-->>API: 기존 QueueEntry 반환
+    else 신규 요청
+        API->>R: INCR sequence:sale:{id}
+        API->>DB: QueueEntry(WAITING) 저장
+        DB-->>API: commit
+        API->>R: ZADD waiting:sale:{id}
+    end
+    API-->>C: 202 Accepted + queueEntryId
+
+    loop dispatch 주기마다
+        W->>DB: WAITING 상품 ID 조회
+        W->>R: Lua claim (waiting -> processing)
+        W->>DB: WAITING -> PROCESSING
+        W->>P: PurchaseCommandFacade.reserve()
+        alt 예약 성공
+            P-->>W: purchaseId
+            W->>DB: QueueEntry -> RESERVED
+        else 재고 소진
+            P-->>W: INSUFFICIENT_INVENTORY
+            W->>DB: QueueEntry -> SOLD_OUT
+        end
+        W->>R: ZREM processing
+    end
+
+    C->>API: GET queue-entries/{id}
+    API->>DB: QueueEntry 조회 및 소유자 검증
+    API->>R: WAITING이면 ZRANK 조회
+    API-->>C: 상태와 참고 순번 반환
+```
+
+`ReservationQueueWorker`는 HTTP 요청 스레드와 별도로 실행되는 Spring 백그라운드 작업자다. 현재는 `@Scheduled`로 항목을 claim하고 `reservationQueueTaskExecutor`에 구매 처리 작업을 제출한다. Lua 스크립트가 처리 중인 ZSET 수를 확인하고 남은 슬롯만큼 `waiting`에서 `processing`으로 이동시키므로, 같은 상품의 DB 예약 경로 동시 진입 수를 제한한다.
+
+### 현재 설정
+
+`app/src/main/resources/application.yml`에서 환경 변수로 조정한다.
+
+| 설정 | 기본값 | 의미 |
+|---|---:|---|
+| `QUEUE_MAX_CONCURRENT_PROCESSING` | `10` | 상품별 Redis processing ZSET에 claim할 최대 항목 수 |
+| `QUEUE_CLAIM_BATCH_SIZE` | `10` | 한 Lua claim 호출에서 가져올 최대 항목 수 |
+| `QUEUE_WORKER_FIXED_DELAY` | `100ms` | 대기열 dispatch 작업 주기 |
+| `QUEUE_WORKER_INITIAL_DELAY` | `1000ms` | 애플리케이션 시작 후 첫 dispatch 지연 |
+| `QUEUE_RECOVERY_FIXED_DELAY` | `5000ms` | Redis/DB 불일치 및 stale processing 복구 주기 |
+| `QUEUE_RECOVERY_INITIAL_DELAY` | `5000ms` | 첫 복구 작업 지연 |
+| `QUEUE_PROCESSING_TIMEOUT_SECONDS` | `30초` | PROCESSING 항목을 stale로 판단하는 시간 |
+
+TaskExecutor의 최대 스레드 수는 현재 `QUEUE_MAX_CONCURRENT_PROCESSING`과 같은 값이다. 단일 판매 상품에서는 Redis 슬롯과 실제 실행 수가 일치한다. 여러 상품이 동시에 열리면 Redis 슬롯은 상품별로 계산되지만 TaskExecutor는 애플리케이션 전체에서 공유되므로, 상품 간 공정성이나 전역 처리량 제한이 필요해지는 시점에 별도 정책을 추가한다.
+
+### 장애와 복구
+
+- DB 커밋 후 Redis `ZADD`가 실패하면 `WAITING` DB 행은 남는다. 복구 작업이 다시 ZSET에 적재한다.
+- Redis claim 이후 프로세스가 중단되면 `PROCESSING` 항목은 timeout 이후 `WAITING`으로 되돌린다.
+- 구매 DB 트랜잭션이 성공하고 QueueEntry 완료 처리 전에 중단돼도, 구매 요청 키의 멱등성이 중복 구매를 막고 이후 재처리를 허용한다.
+- Redis는 보조 저장소이므로 Redis 항목 유실은 보통 영구 요청 유실이 아니라 복구 전까지의 처리 지연이다.
+
+현재 Compose의 Redis는 로컬 개발용이며 AOF, replica, 영속 볼륨을 설정하지 않는다. Redis 컨테이너 재생성 시 ZSET과 sequence가 초기화될 수 있다. DB 대기열은 복구되지만 대기 순서가 섞일 수 있으므로, 운영에서 순번 보존이 중요하면 Redis 영속화와 고가용성 구성을 추가해야 한다.
+
+## 8. 메시지 큐로의 확장 기준
+
+현재는 하나의 애플리케이션 안에서 Spring TaskExecutor가 비동기 작업을 처리한다. Kafka나 Redis Streams는 아직 구현하지 않았다.
+
+다음 요구가 실제로 생길 때 Kafka를 검토한다.
+
+- 구매 처리 워커를 API 애플리케이션과 독립 배포해야 한다.
+- 여러 워커 인스턴스에서 작업을 분산해야 한다.
+- 작업 전달의 재시도, 소비 지연, 소비자별 처리량을 브로커 차원에서 관찰해야 한다.
+- 구매 완료 이벤트를 여러 독립 서비스에 전달해야 한다.
+
+Kafka를 도입하면 ZSET과 `QueueEntry`를 함께 유지한다. ZSET은 사용자 대기 순번, `QueueEntry`는 상태 조회와 멱등성, Kafka는 입장 허용된 작업의 전달을 담당한다.
+
+```text
+ZSET 대기열 입장 허용
+  -> QueueEntry: WAITING -> PROCESSING
+  -> 같은 DB 트랜잭션에서 Outbox 이벤트 저장
+  -> Outbox Publisher가 Kafka Producer로 발행
+  -> Kafka Consumer가 구매 예약 처리
+  -> QueueEntry: RESERVED / SOLD_OUT
+  -> 처리 성공 뒤 offset commit
+```
+
+이 단계에서는 현재 `reservationQueueTaskExecutor`와 Worker의 구매 처리 부분이 Kafka Consumer로 대체된다. ZSET에서 순번을 꺼내 Outbox를 만드는 admission dispatcher와 DB/Redis 복구 작업은 남는다. DB 상태 변경과 Kafka 발행을 직접 연달아 호출하면 중간 장애에서 작업이 유실될 수 있으므로 Outbox 없이 Kafka를 붙이지 않는다.
+
+## 9. 실행 환경과 검증
+
+### 로컬 실행
 
 ```bash
 cp .env.example .env
 docker compose up -d
+./gradlew :app:bootRun
 ```
 
-테스트에서 DB가 필요한 경우에는 H2를 사용하지 않고 Testcontainers PostgreSQL을 사용한다. 이 방식은 Flyway migration과 JPA 매핑을 실제 PostgreSQL에서 검증한다.
-
-## 8. 이벤트 사용 기준
-
-도메인 이벤트는 상태 변경이 완료됐다는 사실을 표현한다. Aggregate가 이벤트를 만들고, Application Service가 저장과 발행 시점을 조율한다. 외부 모듈이 구독할 이벤트는 `domain.event`의 `events` Named Interface로 공개한다.
+기본 연결 값은 다음과 같다.
 
 ```text
-Purchase.reserve()
-  -> Purchase 상태 변경
-  -> PurchaseReserved 등록
-
-PurchaseCommandService
-  -> Purchase 저장
-  -> 저장된 Purchase가 PurchaseReserved 생성
-  -> PurchaseEventPublisher에 전달
-  -> 트랜잭션 커밋 뒤 Spring 이벤트 발행
+PostgreSQL: localhost:5432 / limited_ticketing
+Redis:      localhost:6379
+Application: localhost:8081
 ```
 
-현재 `PurchaseReserved`는 커밋 뒤에만 발행된다. 트랜잭션이 롤백되면 이벤트는 소비되지 않는다. 후속 비즈니스 요구가 생긴 모듈만 `purchase::events` 의존성을 선언해 구독한다.
+`spring.data.redis.repositories.enabled=false`는 Spring Data Redis Repository 자동 구성을 끄는 설정이다. `StringRedisTemplate` 기반의 ZSET 사용을 끄는 설정이 아니다.
 
-처음에는 프로세스 내부 이벤트를 사용한다. 전달 보장, 재시도, 소비자 독립 확장, 별도 서비스 추출이 실제로 필요해질 때 Outbox와 Kafka 도입을 검토한다.
+로컬 및 테스트 프로필에서는 `X-Member-Id`, `X-Admin-Id`를 임시 인증 수단으로 사용한다. 운영 환경에는 개발용 인증 필터가 등록되지 않으므로 실제 인증/인가 방식을 별도로 구성해야 한다.
 
-## 9. 아키텍처 검증과 시각화
-
-`app` 모듈의 테스트는 두 가지를 수행한다.
-
-1. `ModularityTests`는 `ApplicationModules.verify()`로 금지된 모듈 참조, Named Interface 외부 접근, 순환 의존을 검증한다.
-2. `ModularityDocumentationTests`는 Spring Modulith `Documenter`로 현재 코드에서 모듈 문서를 생성한다.
-3. `LayeringArchitectureTests`는 Domain의 Spring/JPA 의존성, Application의 Infrastructure 구현체 직접 의존, Presentation/Public DTO의 Domain 타입 노출, Public DTO의 내부 Application DTO 의존, Presentation의 Application Service 직접 호출을 검증한다.
+### 자동 검증
 
 ```bash
 ./gradlew test
 ```
 
-`configuration`, `presentation`은 애플리케이션 조립과 HTTP 어댑터이며 비즈니스 애플리케이션 모듈이 아니다. 따라서 모듈 검증과 문서 생성 대상에서 제외한다.
+| 검증 | 목적 |
+|---|---|
+| `ModularityTests` | Named Interface 외부 접근, 금지된 모듈 참조, 순환 의존 검증 |
+| `LayeringArchitectureTests` | Domain의 Spring/JPA 의존, Application의 Infrastructure 직접 의존, 공개 DTO의 Domain/내부 DTO 노출 검증 |
+| `PurchaseConcurrencyIntegrationTest` | 동시 예약에서 정확한 재고 수량과 활성 구매 제약 검증 |
+| `PurchaseReservationIntegrationTest` | 구매 예약과 구매 멱등성 검증 |
+| `PaymentLifecycleIntegrationTest` | 결제 실패/재시도/승인/취소에 따른 구매와 재고 전이 검증 |
+| `SaleProductManagementIntegrationTest` | 판매 생성, 상태 전이, 재고 생성, 목록/상세 조회 검증 |
+| `ReservationQueueIntegrationTest` | Redis ZSET과 PostgreSQL에서 대기열 멱등성, 중복 차단, 예약/품절, 복구 검증 |
 
-문서 생성 결과는 Git 추적 대상이 아닌 다음 경로에 생성된다.
+`ModularityDocumentationTests`는 Spring Modulith `Documenter`로 코드 기준의 모듈 문서를 생성한다.
 
 ```text
 app/build/spring-modulith-docs/
-├── components.puml                 # 전체 모듈 관계 PlantUML
-├── module-*.puml                   # 개별 모듈 의존 PlantUML
-├── module-*.adoc                   # 모듈 캔버스
-└── all-docs.adoc                    # 전체 모듈 문서
+├── components.puml
+├── module-*.puml
+├── module-*.adoc
+└── all-docs.adoc
 ```
 
-PlantUML 플러그인 또는 렌더러에서 `*.puml`을 열면 관계도를 볼 수 있다. 새 모듈, Named Interface, 모듈 간 참조를 추가한 뒤에는 반드시 `./gradlew test`를 실행해 검증과 문서 생성을 함께 갱신한다.
-
-## 10. 첫 수직 슬라이스: 구매 예약
-
-첫 구현 범위는 `POST /api/sale-products/{saleProductId}/purchases`다. `local`, `test` 프로필에서는 `X-Member-Id` 헤더를 임시 인증 수단으로 사용한다. OAuth 또는 회원가입은 이 흐름의 범위에 포함하지 않는다.
-
-멱등성 키는 클라이언트가 임의로 만들지 않고, 먼저 인증된 회원이 `POST /api/idempotency-keys`에 용도(`PURCHASE`, `PAYMENT`)를 요청해 서버에서 발급받는다. 발급 키 형식은 `{용도}_{회원ID}_{UUIDv4}`이며 예시는 `purchase_42_550e8400-e29b-41d4-a716-446655440000`이다. UUIDv4의 충돌 가능성은 실질적으로 무시할 수 있고, 실제 저장 단계의 DB 유니크 제약이 최종 방어선이 된다.
-
-키를 발급받는 것만으로 멱등성이 완료되지는 않는다. 클라이언트는 구매 요청의 `Idempotency-Key` 헤더 또는 결제 요청 본문의 `paymentRequestKey`에 발급받은 값을 넣고, 타임아웃·네트워크 오류로 재시도할 때도 반드시 같은 값을 다시 사용해야 한다. 요청마다 새 키를 발급받으면 서로 다른 요청으로 처리된다.
-
-```text
-X-Member-Id
-  -> DevMemberAuthenticationFilter
-  -> MemberPrincipal
-Idempotency-Key
-  -> PurchaseController
-  -> PurchaseCommandFacade
-  -> MemberPurchaseEligibilityFacade(member::api)
-  -> SaleProductPurchaseFacade(sale::api)
-  -> InventoryCommandFacade(inventory::api)
-  -> Purchase 저장
-```
-
-`PurchaseCommandService`가 하나의 트랜잭션 안에서 회원 상태 확인, 판매 가능 여부 확인, 구매 생성, 재고 예약을 조율한다. 같은 `Idempotency-Key` 요청은 기존 Purchase를 반환하고 재고를 다시 예약하지 않는다. 서로 다른 키로 같은 회원과 상품을 다시 구매하면 `active_purchase_key` 제약으로 409를 반환한다. 두 제약은 PostgreSQL `ON CONFLICT DO NOTHING`과 기존 행 재조회로 처리해, 정상적인 중복 요청을 SQL 예외 로그로 남기지 않는다.
-
-재고 예약·예약 확정·예약 반환은 조회 후 저장하지 않고 조건부 원자 UPDATE로 처리한다. 예를 들어 예약은 `available_quantity >= 요청 수량`을 조건으로 `available_quantity`를 줄이고 `reserved_quantity`를 늘린다. 영향 행 수가 0이면 재고 부족으로 409를 반환한다. 따라서 판매 오픈 시 같은 재고 행에 요청이 집중되어도 수량 유실이나 음수 재고가 발생하지 않는다.
-
-## 11. 판매 운영과 조회
-
-판매 상품은 `DRAFT -> OPEN -> CLOSED` 상태 전이를 가진다. 생성과 판매 기간 변경은 DRAFT에서만 가능하고, OPEN은 설정한 판매 기간 안에서만 가능하다. 판매 생성 요청에는 상품 정보, 가격, 판매 기간, 초기 재고를 함께 받아 `Product`, `SaleProduct`, `Inventory`를 하나의 트랜잭션에서 생성한다.
-
-```text
-POST /api/admin/sale-products
-  -> Product 생성
-  -> SaleProduct(DRAFT) 생성
-  -> Inventory 초기화
-
-PUT  /api/admin/sale-products/{id}/sale-period
-POST /api/admin/sale-products/{id}/open
-POST /api/admin/sale-products/{id}/close
-
-GET  /api/sale-products?status=OPEN&page=0&size=20
-GET  /api/sale-products/{id}
-```
-
-`GET /api/sale-products/**`는 공개 조회 API다. 관리자 API는 `local`, `test` 프로필에서만 `X-Admin-Id: admin` 헤더로 `ROLE_ADMIN`을 부여받는다. 운영 환경에서는 개발용 필터가 등록되지 않으므로 실제 인증·인가 방식을 도입해야 한다.
-
-목록 Controller는 Spring Data `Pageable`을 HTTP 파라미터 바인딩 용도로만 수신한다. Facade부터는 page, size, 허용된 정렬 enum으로 변환해 전달하고, Infrastructure Adapter가 다시 Spring Data `Pageable`을 생성한다. 현재 허용 정렬 항목은 `id`, `saleStartsAt`, `salePrice`이며 임의의 JPA 필드명은 전달할 수 없다. 현재 목록은 판매 상품과 상품 정보를 조합하며, 조인 Projection이나 QueryDSL은 목록 조회가 실제 병목으로 확인될 때 도입한다.
-
-## 12. 두 번째 수직 슬라이스: 결제 시도와 예약 재고 전이
-
-실제 PG 연동 전까지는 결제 성공·실패를 API로 시뮬레이션한다. `Payment`는 구매당 하나가 아니라 결제 시도 이력이며, 재시도마다 새로운 `paymentRequestKey`로 `READY` Payment를 생성한다.
-
-```text
-POST /api/purchases/{purchaseId}/payments        # 결제 시도 생성
-POST /api/payments/{paymentId}/fail              # 결제 실패 시뮬레이션
-POST /api/payments/{paymentId}/approve           # 결제 승인 시뮬레이션
-POST /api/purchases/{purchaseId}/cancel          # 예약 취소
-```
-
-결제 생성 요청 본문은 서버가 `POST /api/idempotency-keys`에서 발급한 `PAYMENT` 용도 키를 `paymentRequestKey`로 포함한다. 같은 키로 재시도하면 기존 Payment를 반환하며, 새로운 결제 시도를 만들 때만 새 키를 발급받아 사용한다.
-
-```text
-결제 실패
-  -> Payment: READY -> FAILED
-  -> Purchase: PENDING_PAYMENT 유지
-  -> Inventory: reserved 유지
-  -> 새 결제 시도 가능
-
-결제 승인
-  -> Payment: READY -> APPROVED
-  -> Purchase: PENDING_PAYMENT -> PAID
-  -> Inventory: reserved -> sold
-
-예약 취소 또는 만료
-  -> Purchase: PENDING_PAYMENT -> CANCELLED 또는 EXPIRED
-  -> Inventory: reserved -> available
-```
-
-예약 만료는 30초 주기의 단일 프로세스 스케줄러가 처리한다. 다중 인스턴스 배포가 필요한 시점에는 중복 실행 방지와 분산 스케줄링 방식을 별도로 결정한다.
-
-`payment` 모듈은 `purchase::api`, `inventory::api`의 공개 Facade와 DTO만 사용한다. `Purchase`, `Inventory`의 JPA Entity나 Repository에는 직접 접근하지 않는다.
-
-## 13. 테스트 범위
-
-- `purchase`, `inventory`, `payment` 모듈의 Domain 단위 테스트는 상태 전이 규칙을 검증한다.
-- `PaymentLifecycleIntegrationTest`는 결제 실패 후 재시도, 승인 시 구매 완료와 재고 판매 전환, 예약 취소 후 재예약을 PostgreSQL Testcontainer에서 검증한다.
-- `PurchaseConcurrencyIntegrationTest`는 재고 10개에 서로 다른 회원 100명이 동시에 예약할 때 정확히 10건만 생성되고, 나머지는 재고 부족(409)으로 처리되는지 검증한다.
-- `SaleProductManagementIntegrationTest`는 관리자 헤더, DRAFT 생성, 초기 재고 생성, 판매 기간 변경, OPEN/CLOSED 전이와 공개 목록·상세 조회를 검증한다.
-- 구매·결제 멱등성 테스트는 동일 요청 키의 동시 재시도가 하나의 Purchase 또는 Payment만 만들고 기존 결과를 반환하는지 검증한다.
-- `ModularityTests`는 `payment -> purchase/inventory` 의존이 각 모듈의 `api` Named Interface로만 향하는지 검증한다.
-
-## 14. Redis 대기열과 비동기 예약
-
-판매 오픈 직후의 요청을 즉시 모두 PostgreSQL 재고 행으로 보내지 않기 위해, 대기열은 Redis Sorted Set(ZSET)으로 순서를 관리한다. 판매 상품별 `waiting` ZSET은 입장 순서, `processing` ZSET은 현재 처리 중인 요청과 시작 시각을 가진다. Lua 스크립트가 빈 처리 슬롯만큼만 `waiting`에서 `processing`으로 원자적으로 이동시킨다.
-
-```text
-POST /api/sale-products/{saleProductId}/queue-entries
-  -> reservation_queue_entries(WAITING) 저장
-  -> 커밋 후 Redis waiting ZSET 등록
-  -> Worker가 처리 슬롯만큼 claim
-  -> 기존 PurchaseCommandFacade.reserve()
-  -> RESERVED 또는 SOLD_OUT 기록
-```
-
-대기열은 구매의 최종 정합성 경계가 아니다. `PurchaseCommandService`의 구매 멱등성·활성 구매 제약과 `Inventory`의 조건부 원자 갱신이 여전히 최종 보호 장치다. Redis는 유입 제어와 처리 순서를 담당하고, DB의 `WAITING` 레코드는 Redis 장애 또는 커밋 직후 반영 실패 시 복구 스케줄러가 다시 ZSET에 적재한다.
-
-현재 직접 구매 API는 성능 기준선 비교를 위해 유지한다. 대기열 API는 `202 Accepted`와 `Location: /api/queue-entries/{queueEntryId}`를 반환하며, 클라이언트는 상태 조회 API로 `WAITING`, `PROCESSING`, `RESERVED`, `SOLD_OUT`, `FAILED`를 확인한다. SSE/WebSocket 알림, 다중 인스턴스 리더 선출, Redis Streams/Kafka는 실제 부하 결과와 운영 요구가 생긴 뒤에 추가한다. 상세 선택 근거와 단계별 검증 항목은 [WAITING_ROOM_SPEC.md](WAITING_ROOM_SPEC.md)에 기록한다.
-
-- `ReservationQueueIntegrationTest`는 PostgreSQL과 Redis Testcontainers에서 요청 키 재시도, 활성 대기열 중복 차단, 재고 1건에 대한 `RESERVED`/`SOLD_OUT` 전이를 검증한다.
+새 모듈, Named Interface, 모듈 간 의존성을 변경할 때는 `./gradlew test`를 실행해 아키텍처 검증과 모듈 문서 생성을 함께 갱신한다. Redis 대기열의 세부 선택 근거와 단계별 부하 검증 계획은 [WAITING_ROOM_SPEC.md](WAITING_ROOM_SPEC.md)에 기록한다.

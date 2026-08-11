@@ -13,7 +13,10 @@ public class PurchaseExpirationScheduler {
         this.purchaseExpirationService = purchaseExpirationService;
     }
 
-    @Scheduled(fixedDelayString = "${limited-ticketing.purchase.expiration.fixed-delay:30000}")
+    @Scheduled(
+        fixedDelayString = "${limited-ticketing.purchase.expiration.fixed-delay:30000}",
+        initialDelayString = "${limited-ticketing.purchase.expiration.initial-delay:30000}"
+    )
     public void expireDuePurchases() {
         purchaseExpirationService.expireDuePurchases();
     }

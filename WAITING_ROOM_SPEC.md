@@ -29,10 +29,12 @@ DB의 `Purchase`, `Inventory`는 최종 정합성 기준으로 유지한다. Red
 - `GET /api/queue-entries/{queueEntryId}` 상태 조회 API
 - 제한된 워커가 기존 `PurchaseCommandFacade.reserve()`를 호출하는 비동기 예약 처리
 - Redis 등록 실패와 처리 중 워커 중단에 대비한 DB 기반 복구
+- keyset cursor 기반 전체 WAITING 복원과 Redis 고아 항목 정리
+- 종료된 판매의 Redis 키 수명 주기 정리
 
 ### 후속 단계
 
-다음 단계의 순서와 완료 기준은 [10. 단계별 진행 계획](#10-단계별-진행-계획)을 따른다. Redis Stream, Kafka, 분산 락은 측정 결과 또는 서비스 분리 요구가 생기기 전에는 도입하지 않는다.
+다음 단계의 순서와 완료 기준은 [11. 단계별 진행 계획](#11-단계별-진행-계획)을 따른다. Redis Stream, Kafka, 분산 락은 측정 결과 또는 서비스 분리 요구가 생기기 전에는 도입하지 않는다.
 
 ## 4. API Contract
 
@@ -98,6 +100,8 @@ sequence:sale:{saleProductId}     # String: INCR sequence
 
 처리 슬롯은 상품별 설정값만큼 동시에 열리므로, 먼저 claim된 묶음 안에서는 실제 DB 예약 완료 순서가 달라질 수 있다. ZSET은 **입장·처리 시작 순서**를 보장하며, 구매 성공의 엄격한 FIFO 순서가 요구되면 상품별 처리 슬롯을 1로 설정해야 한다.
 
+Redis 접근 책임은 순번 발급용 `QueueSequenceGenerator`, 정상 처리용 `ReservationQueueStore`, 복구용 `ReservationQueueRecoveryStore`로 분리한다. 실제 구현체는 `ReservationQueueRedisKeys`를 공유하므로 키 문자열이 여러 클래스에 중복되지 않는다. waiting과 processing 사이의 claim은 Lua 원자 연산이므로 두 개의 독립 Store로 나누지 않는다.
+
 ## 7. Processing Flow
 
 ```text
@@ -122,6 +126,18 @@ sequence:sale:{saleProductId}     # String: INCR sequence
 
 Redis claim 뒤 워커가 중단될 수 있으므로 PROCESSING 상태가 설정 시간보다 오래 남으면 복구 작업이 WAITING으로 되돌려 Redis ZSET에 재등록한다. Redis 등록 자체가 실패한 WAITING DB 행도 복구 작업이 다시 등록한다.
 
+복구 작업은 다음 순서로 실행한다.
+
+```text
+오래된 DB PROCESSING을 배치 단위로 모두 WAITING으로 전환
+  -> 트랜잭션 커밋
+  -> 상품별 (queue_sequence > cursor) keyset 조회로 전체 WAITING을 Redis에 보충
+  -> Redis waiting/processing ID와 DB ID를 비교해 DB에 없는 ID 제거
+  -> CLOSED 판매이며 DB에 WAITING/PROCESSING이 없으면 Redis 3개 키 삭제
+```
+
+`QUEUE_RECOVERY_BATCH_SIZE`의 기본값은 1,000이다. OFFSET을 사용하면 앞 항목의 상태 변경에 따라 누락이나 중복이 생길 수 있으므로, 상품별로 단조 증가하는 `queue_sequence`를 cursor로 사용한다.
+
 ## 8. Consistency Rules
 
 - Redis ZSET은 순서와 동시 처리 제한용 보조 저장소다.
@@ -129,18 +145,40 @@ Redis claim 뒤 워커가 중단될 수 있으므로 PROCESSING 상태가 설정
 - Redis 분산 락은 사용하지 않는다. 상품별 hot row의 대기를 Redis 락으로 옮기는 것은 처리량 개선이 아니다.
 - Redis 재고 카운터도 이번 단계에서는 사용하지 않는다. DB 재고와 Redis 수량의 보상·복구 문제를 추가하지 않기 위해서다.
 - 알려진 비즈니스 실패(재고 부족)는 Queue Entry의 최종 상태로 저장한다. 예상하지 못한 시스템 오류는 PROCESSING 상태를 유지해 복구 대상이 된다.
+- Redis에서 claim한 ID가 DB에 없거나 이미 WAITING이 아니면 `claim()`은 `Optional.empty()`를 반환한다. Worker는 이를 오류로 반복하지 않고 Redis processing 항목을 제거한다.
+- Redis 고아 항목은 PostgreSQL에 같은 UUID의 QueueEntry가 없는 waiting/processing 구성원이다. 복구 작업은 이를 두 ZSET에서 제거한다.
+- 판매가 `CLOSED`이고 PostgreSQL에 WAITING/PROCESSING 항목이 없을 때 `waiting`, `processing`, `sequence` 키를 삭제한다. DB 초기화 등으로 판매 자체가 존재하지 않는 키도 삭제하며, 판매 중인 대기열 키는 삭제하지 않는다.
 
-## 9. Verification
+## 9. 복구 문제와 해결
+
+로컬 부하 테스트 후 PostgreSQL만 초기화하고 Redis를 유지하면 이전 실행의 UUID가 ZSET에 남을 수 있었다. 재시작한 Worker가 이 ID를 claim한 뒤 필수 조회 Finder를 호출하면서 `Queue entry not found` 예외가 반복됐고, 예외 때문에 processing ZSET에서도 제거되지 않았다.
+
+또한 기존 복구 조회는 `LIMIT 1000`만 사용했다. 첫 1,000건이 계속 WAITING이면 매 실행마다 같은 행만 조회하므로 1,001번째 이후 항목은 Redis에 복원되지 않는다. 이는 조회 성능 문제가 아니라 복구 누락을 일으키는 정확성 문제다.
+
+다음과 같이 해결했다.
+
+1. `claim()`은 DB 부재와 WAITING이 아닌 상태를 정상적인 claim 실패로 취급해 `Optional.empty()`를 반환한다.
+2. Worker는 빈 결과를 받으면 해당 UUID를 processing ZSET에서 제거한다.
+3. Recovery는 상품별 `queue_sequence` keyset cursor로 WAITING 행을 끝까지 순회한다.
+4. Redis waiting/processing 구성원을 DB와 비교하고 DB에 없는 UUID를 제거한다.
+5. 판매 종료 후 활성 QueueEntry가 없거나 판매 자체가 DB에 없으면 세 Redis 키를 삭제해 다음 실행에 상태가 남지 않게 한다.
+
+환경명과 판매 세대 식별자를 Redis 키에 포함하는 방식은 이번 범위에 포함하지 않았다. 따라서 DB를 초기화해 ID가 재사용될 수 있는 로컬 테스트에서는 fixture 준비 스크립트가 해당 판매 ID의 세 키를 먼저 삭제한다.
+
+## 10. Verification
 
 1. 같은 요청 키 재시도는 Queue Entry 하나만 생성한다.
 2. 다른 요청 키의 같은 회원/상품 중복 대기는 거부한다.
 3. 제한 인원이 넘는 요청은 WAITING에 남고, 처리 중 수는 설정값을 넘지 않는다.
 4. 워커가 예약을 완료하면 Purchase와 Inventory가 기존 정책대로 변경된다.
 5. 재고 부족은 Queue Entry를 SOLD_OUT으로 바꾼다.
-6. Redis ZSET에 없는 WAITING DB 행과 오래된 PROCESSING 행은 복구 작업으로 다시 처리 가능해진다.
-7. Spring Modulith 검증으로 queue -> purchase/member/sale 공개 API 의존성만 허용한다.
+6. Redis ZSET에 없는 WAITING DB 행은 복구 배치보다 많아도 모두 다시 등록된다.
+7. 오래된 PROCESSING DB 행은 WAITING으로 돌아가 다시 처리 가능해진다.
+8. DB에 없는 Redis waiting/processing UUID는 복구 작업이 제거한다.
+9. CLOSED 판매에 활성 QueueEntry가 없으면 Redis 세 키가 삭제된다.
+10. Spring Modulith 검증으로 queue -> purchase/member/sale 공개 API 의존성만 허용한다.
 
-## 10. 단계별 진행 계획
+## 11. 단계별 진행 계획
 
 | 단계 | 상태 | 수행 내용 | 선택 이유와 완료 기준 |
 |---|---|---|---|

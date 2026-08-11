@@ -198,6 +198,8 @@ PostgreSQL이 최종 영속 저장소다. `app`이 DataSource, Flyway, JPA 설�
 - 적용된 migration 파일은 수정하지 않고 변경마다 다음 버전의 SQL 파일을 추가한다.
 - Hibernate는 `ddl-auto: validate`로 Entity와 스키마의 불일치만 검증한다.
 - H2 대신 Testcontainers PostgreSQL로 통합 테스트를 수행한다.
+- Aggregate 간 참조는 Domain 모델에서 식별자로 표현하되, 단일 DB 안의 물리 참조는 FK로 보호한다.
+- FK 삭제 정책은 `RESTRICT`를 사용하며 Aggregate를 연쇄 삭제하지 않는다.
 
 구매와 결제의 멱등성은 DB 유니크 제약과 기존 행 재조회로 보장한다.
 

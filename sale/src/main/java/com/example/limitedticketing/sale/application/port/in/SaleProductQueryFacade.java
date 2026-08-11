@@ -39,6 +39,15 @@ public class SaleProductQueryFacade {
         );
     }
 
+    public boolean isClosed(FindSaleProductInput input) {
+        return saleProductQueryService.findDetail(new FindSaleProductQuery(input.saleProductId())).status()
+            == SaleStatus.CLOSED;
+    }
+
+    public boolean exists(FindSaleProductInput input) {
+        return saleProductQueryService.exists(new FindSaleProductQuery(input.saleProductId()));
+    }
+
     public SaleProductPage findPage(FindSaleProductsInput input) {
         SaleProductPageResult result = saleProductQueryService.findPage(
             new FindSaleProductsQuery(

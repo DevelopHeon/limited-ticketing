@@ -170,6 +170,92 @@ class ReservationQueueIntegrationTest {
         assertThat(stringRedisTemplate.opsForZSet().rank(processingKey, entry.id().toString())).isNull();
     }
 
+    @Test
+    void returnsEmptyWhenClaimedRedisEntryDoesNotExistInDatabase() {
+        assertThat(reservationQueueClaimService.claim(UUID.randomUUID())).isEmpty();
+    }
+
+    @Test
+    void recoversEveryWaitingEntryUsingTheKeysetCursor() throws Exception {
+        Fixture fixture = createFixture(3);
+        Member thirdMember = memberRepository.save(Member.register(
+            "queue-member-" + System.nanoTime(),
+            "세 번째 회원"
+        ));
+        List<QueueEntry> entries = List.of(
+            enqueue(fixture.saleProductId(), fixture.firstMemberId(), issuePurchaseKey(fixture.firstMemberId())),
+            enqueue(fixture.saleProductId(), fixture.secondMemberId(), issuePurchaseKey(fixture.secondMemberId())),
+            enqueue(fixture.saleProductId(), thirdMember.getId(), issuePurchaseKey(thirdMember.getId()))
+        );
+        String waitingKey = "waiting:sale:" + fixture.saleProductId();
+        stringRedisTemplate.delete(waitingKey);
+
+        reservationQueueRecoveryService.recover(30);
+
+        entries.forEach(entry -> assertThat(
+            stringRedisTemplate.opsForZSet().rank(waitingKey, entry.id().toString())
+        ).isNotNull());
+    }
+
+    @Test
+    void removesWaitingAndProcessingEntriesThatDoNotExistInDatabase() {
+        Fixture fixture = createFixture(1);
+        UUID missingWaitingEntryId = UUID.randomUUID();
+        UUID missingProcessingEntryId = UUID.randomUUID();
+        String waitingKey = "waiting:sale:" + fixture.saleProductId();
+        String processingKey = "processing:sale:" + fixture.saleProductId();
+        stringRedisTemplate.opsForZSet().add(waitingKey, missingWaitingEntryId.toString(), 1);
+        stringRedisTemplate.opsForZSet().add(
+            processingKey,
+            missingProcessingEntryId.toString(),
+            System.currentTimeMillis()
+        );
+
+        reservationQueueRecoveryService.recover(30);
+
+        assertThat(stringRedisTemplate.opsForZSet().rank(waitingKey, missingWaitingEntryId.toString())).isNull();
+        assertThat(stringRedisTemplate.opsForZSet().rank(processingKey, missingProcessingEntryId.toString())).isNull();
+    }
+
+    @Test
+    void deletesRedisKeysWhenTheSaleProductNoLongerExists() {
+        long missingSaleProductId = Long.MAX_VALUE;
+        stringRedisTemplate.opsForValue().set("sequence:sale:" + missingSaleProductId, "10");
+        stringRedisTemplate.opsForZSet().add(
+            "waiting:sale:" + missingSaleProductId,
+            UUID.randomUUID().toString(),
+            1
+        );
+
+        reservationQueueRecoveryService.recover(30);
+
+        assertThat(stringRedisTemplate.hasKey("waiting:sale:" + missingSaleProductId)).isFalse();
+        assertThat(stringRedisTemplate.hasKey("processing:sale:" + missingSaleProductId)).isFalse();
+        assertThat(stringRedisTemplate.hasKey("sequence:sale:" + missingSaleProductId)).isFalse();
+    }
+
+    @Test
+    void deletesAllRedisKeysWhenClosedSaleHasNoActiveQueueEntry() throws Exception {
+        Fixture fixture = createFixture(1);
+        QueueEntry entry = enqueue(
+            fixture.saleProductId(),
+            fixture.firstMemberId(),
+            issuePurchaseKey(fixture.firstMemberId())
+        );
+        reservationQueueWorker.dispatchWaitingEntries();
+        awaitCompletion(entry.id(), fixture.firstMemberId());
+
+        SaleProduct saleProduct = saleProductRepository.findById(fixture.saleProductId()).orElseThrow();
+        saleProduct.close();
+        saleProductRepository.save(saleProduct);
+
+        reservationQueueRecoveryService.recover(30);
+
+        assertThat(stringRedisTemplate.hasKey("waiting:sale:" + fixture.saleProductId())).isFalse();
+        assertThat(stringRedisTemplate.hasKey("processing:sale:" + fixture.saleProductId())).isFalse();
+        assertThat(stringRedisTemplate.hasKey("sequence:sale:" + fixture.saleProductId())).isFalse();
+    }
+
     private QueueEntry enqueue(Long saleProductId, Long memberId, String requestKey) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/sale-products/{saleProductId}/queue-entries", saleProductId)
                 .header("X-Member-Id", memberId)

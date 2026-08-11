@@ -8,8 +8,6 @@ import java.util.UUID;
 
 public interface ReservationQueueStore {
 
-    long nextSequence(Long saleProductId);
-
     void enqueue(ReservationQueueEntry entry);
 
     List<UUID> claimNext(Long saleProductId, int maxConcurrentProcessing, int claimBatchSize, Instant claimedAt);
@@ -21,8 +19,6 @@ public interface ReservationQueueStore {
     void requeue(ReservationQueueEntry entry);
 
     boolean contains(Long saleProductId, UUID queueEntryId);
-
-    void removeProcessingOlderThan(Long saleProductId, Instant threshold);
 
     OptionalLong findPosition(Long saleProductId, UUID queueEntryId);
 }

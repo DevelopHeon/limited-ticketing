@@ -51,6 +51,11 @@ public class SaleProductQueryService {
     }
 
     @Transactional(readOnly = true)
+    public boolean exists(FindSaleProductQuery query) {
+        return saleProductRepository.findById(query.saleProductId()).isPresent();
+    }
+
+    @Transactional(readOnly = true)
     public SaleProductPageResult findPage(FindSaleProductsQuery query) {
         SaleProductPage saleProductPage = saleProductRepository.findPage(
             query.status(),

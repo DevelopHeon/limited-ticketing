@@ -5,6 +5,7 @@ import com.example.limitedticketing.member.application.port.in.dto.EnsureMemberP
 import com.example.limitedticketing.queue.application.command.dto.EnqueueReservationCommand;
 import com.example.limitedticketing.queue.application.command.dto.ReservationQueueEntryResult;
 import com.example.limitedticketing.queue.application.port.out.QueueEntryIdGenerator;
+import com.example.limitedticketing.queue.application.port.out.QueueSequenceGenerator;
 import com.example.limitedticketing.queue.application.port.out.ReservationQueueStore;
 import com.example.limitedticketing.queue.domain.exception.ReservationQueueException;
 import com.example.limitedticketing.queue.domain.model.ReservationQueueEntry;
@@ -30,6 +31,7 @@ public class ReservationQueueCommandService {
     private final SaleProductPurchaseFacade saleProductPurchaseFacade;
     private final ReservationQueueEntryRepository reservationQueueEntryRepository;
     private final QueueEntryIdGenerator queueEntryIdGenerator;
+    private final QueueSequenceGenerator queueSequenceGenerator;
     private final ReservationQueueStore reservationQueueStore;
     private final Clock clock;
 
@@ -38,6 +40,7 @@ public class ReservationQueueCommandService {
         SaleProductPurchaseFacade saleProductPurchaseFacade,
         ReservationQueueEntryRepository reservationQueueEntryRepository,
         QueueEntryIdGenerator queueEntryIdGenerator,
+        QueueSequenceGenerator queueSequenceGenerator,
         ReservationQueueStore reservationQueueStore,
         Clock clock
     ) {
@@ -45,6 +48,7 @@ public class ReservationQueueCommandService {
         this.saleProductPurchaseFacade = saleProductPurchaseFacade;
         this.reservationQueueEntryRepository = reservationQueueEntryRepository;
         this.queueEntryIdGenerator = queueEntryIdGenerator;
+        this.queueSequenceGenerator = queueSequenceGenerator;
         this.reservationQueueStore = reservationQueueStore;
         this.clock = clock;
     }
@@ -69,7 +73,7 @@ public class ReservationQueueCommandService {
             command.memberId(),
             command.saleProductId(),
             command.purchaseRequestKey(),
-            reservationQueueStore.nextSequence(command.saleProductId()),
+            queueSequenceGenerator.nextSequence(command.saleProductId()),
             requestedAt
         );
         IdempotentReservationQueueEntry savedEntry = reservationQueueEntryRepository.saveIfAbsent(entry);

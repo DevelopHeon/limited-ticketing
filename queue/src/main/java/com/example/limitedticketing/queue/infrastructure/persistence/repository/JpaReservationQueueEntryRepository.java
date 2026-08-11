@@ -2,6 +2,7 @@ package com.example.limitedticketing.queue.infrastructure.persistence.repository
 
 import com.example.limitedticketing.queue.infrastructure.persistence.entity.ReservationQueueEntryJpaEntity;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -22,8 +23,10 @@ public interface JpaReservationQueueEntryRepository extends JpaRepository<Reserv
         """)
     List<Long> findSaleProductIdsWithWaitingEntries();
 
-    List<ReservationQueueEntryJpaEntity> findByStatusOrderByQueueSequenceAsc(
+    List<ReservationQueueEntryJpaEntity> findBySaleProductIdAndStatusAndQueueSequenceGreaterThanOrderByQueueSequenceAsc(
+        Long saleProductId,
         com.example.limitedticketing.queue.domain.model.ReservationQueueStatus status,
+        long queueSequence,
         Pageable pageable
     );
 
@@ -31,6 +34,14 @@ public interface JpaReservationQueueEntryRepository extends JpaRepository<Reserv
         com.example.limitedticketing.queue.domain.model.ReservationQueueStatus status,
         LocalDateTime threshold,
         Pageable pageable
+    );
+
+    @Query("select entry.id from ReservationQueueEntryJpaEntity entry where entry.id in :queueEntryIds")
+    List<UUID> findExistingIds(@Param("queueEntryIds") Collection<UUID> queueEntryIds);
+
+    boolean existsBySaleProductIdAndStatusIn(
+        Long saleProductId,
+        Collection<com.example.limitedticketing.queue.domain.model.ReservationQueueStatus> statuses
     );
 
     @Modifying

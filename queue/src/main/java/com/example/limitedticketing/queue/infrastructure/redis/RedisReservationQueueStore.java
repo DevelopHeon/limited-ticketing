@@ -32,24 +32,20 @@ public class RedisReservationQueueStore implements ReservationQueueStore {
         """, List.class);
 
     private final StringRedisTemplate stringRedisTemplate;
+    private final ReservationQueueRedisKeys keys;
 
-    public RedisReservationQueueStore(StringRedisTemplate stringRedisTemplate) {
+    public RedisReservationQueueStore(
+        StringRedisTemplate stringRedisTemplate,
+        ReservationQueueRedisKeys keys
+    ) {
         this.stringRedisTemplate = stringRedisTemplate;
-    }
-
-    @Override
-    public long nextSequence(Long saleProductId) {
-        Long sequence = stringRedisTemplate.opsForValue().increment(sequenceKey(saleProductId));
-        if (sequence == null) {
-            throw new IllegalStateException("Unable to generate queue sequence");
-        }
-        return sequence;
+        this.keys = keys;
     }
 
     @Override
     public void enqueue(ReservationQueueEntry entry) {
         stringRedisTemplate.opsForZSet().add(
-            waitingKey(entry.getSaleProductId()),
+            keys.waiting(entry.getSaleProductId()),
             entry.getId().toString(),
             entry.getQueueSequence()
         );
@@ -59,7 +55,7 @@ public class RedisReservationQueueStore implements ReservationQueueStore {
     public List<UUID> claimNext(Long saleProductId, int maxConcurrentProcessing, int claimBatchSize, Instant claimedAt) {
         List<?> claimedEntries = stringRedisTemplate.execute(
             CLAIM_NEXT_SCRIPT,
-            List.of(waitingKey(saleProductId), processingKey(saleProductId)),
+            List.of(keys.waiting(saleProductId), keys.processing(saleProductId)),
             Integer.toString(maxConcurrentProcessing),
             Integer.toString(claimBatchSize),
             Long.toString(claimedAt.toEpochMilli())
@@ -78,46 +74,25 @@ public class RedisReservationQueueStore implements ReservationQueueStore {
 
     @Override
     public void releaseProcessing(Long saleProductId, UUID queueEntryId) {
-        stringRedisTemplate.opsForZSet().remove(processingKey(saleProductId), queueEntryId.toString());
+        stringRedisTemplate.opsForZSet().remove(keys.processing(saleProductId), queueEntryId.toString());
     }
 
     @Override
     public void requeue(ReservationQueueEntry entry) {
-        stringRedisTemplate.opsForZSet().remove(processingKey(entry.getSaleProductId()), entry.getId().toString());
+        stringRedisTemplate.opsForZSet().remove(keys.processing(entry.getSaleProductId()), entry.getId().toString());
         enqueue(entry);
     }
 
     @Override
     public boolean contains(Long saleProductId, UUID queueEntryId) {
         String entryId = queueEntryId.toString();
-        return stringRedisTemplate.opsForZSet().rank(waitingKey(saleProductId), entryId) != null
-            || stringRedisTemplate.opsForZSet().rank(processingKey(saleProductId), entryId) != null;
-    }
-
-    @Override
-    public void removeProcessingOlderThan(Long saleProductId, Instant threshold) {
-        stringRedisTemplate.opsForZSet().removeRangeByScore(
-            processingKey(saleProductId),
-            Double.NEGATIVE_INFINITY,
-            threshold.toEpochMilli()
-        );
+        return stringRedisTemplate.opsForZSet().rank(keys.waiting(saleProductId), entryId) != null
+            || stringRedisTemplate.opsForZSet().rank(keys.processing(saleProductId), entryId) != null;
     }
 
     @Override
     public OptionalLong findPosition(Long saleProductId, UUID queueEntryId) {
-        Long rank = stringRedisTemplate.opsForZSet().rank(waitingKey(saleProductId), queueEntryId.toString());
+        Long rank = stringRedisTemplate.opsForZSet().rank(keys.waiting(saleProductId), queueEntryId.toString());
         return rank == null ? OptionalLong.empty() : OptionalLong.of(rank + 1);
-    }
-
-    private String sequenceKey(Long saleProductId) {
-        return "sequence:sale:" + saleProductId;
-    }
-
-    private String waitingKey(Long saleProductId) {
-        return "waiting:sale:" + saleProductId;
-    }
-
-    private String processingKey(Long saleProductId) {
-        return "processing:sale:" + saleProductId;
     }
 }

@@ -1,4 +1,12 @@
-# 판매 오픈 부하 테스트
+# 부하 테스트
+
+아래 명령은 모두 프로젝트 루트에서 실행한다. 현재 위치와 관계없이 다음 명령으로 루트로 이동할 수 있다.
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+```
+
+## 직접 예약 기준선
 
 이 시나리오는 판매가 이미 `OPEN` 상태이고 재고가 설정된 상황에서, 서로 다른 회원이 동시에 예약을 요청하는 부하를 측정한다. 각 VU는 한 번만 요청하며, 같은 회원 ID를 재사용하지 않는다.
 
@@ -7,6 +15,7 @@
 애플리케이션은 개발 인증 필터가 활성화된 `local` 프로필로 실행한다.
 
 ```bash
+export DATABASE_URL='postgresql://limited_ticketing:limited_ticketing@localhost:5432/limited_ticketing'
 SPRING_PROFILES_ACTIVE=local ./gradlew :app:bootRun
 ```
 
@@ -45,7 +54,7 @@ export MEMBER_IDS="$(psql "$DATABASE_URL" -Atqc "
 mkdir -p load-test/k6/results
 
 k6 run load-test/k6/sale-open.js \
-  -e BASE_URL=http://localhost:8080 \
+  -e BASE_URL=http://localhost:8081 \
   -e SALE_PRODUCT_ID=1 \
   -e MEMBER_IDS="$MEMBER_IDS" \
   -e VUS=100 \
@@ -81,3 +90,160 @@ Redis 대기열이나 분산 락은 다음 조건이 확인된 경우에만 검�
 - DB 락 대기가 지속적으로 증가한다.
 - 재고 정합성은 유지되지만 p95/p99 응답 시간이 목표를 넘는다.
 - 애플리케이션 인스턴스를 늘려도 단일 재고 행 경합이 병목으로 남는다.
+
+## Redis ZSET 대기열
+
+`waiting-room.js`는 각 iteration마다 서로 다른 회원을 사용한다. 먼저 서버의 멱등성 키 API를 호출하고, 발급된 키로 대기열 진입 API를 호출한다. `constant-arrival-rate`를 사용하므로 진입 요청 수와 초당 유입률을 별도로 조정할 수 있다.
+
+k6가 시간 구간 마지막 경계에 요청을 하나 더 예약하지 않도록 실제 scenario duration은 `DURATION_SECONDS * 1000 - 1ms`로 계산한다. 목표 진입 요청 수는 정확히 `RATE * DURATION_SECONDS`다.
+
+멱등성 키 발급 시간과 대기열 진입 시간은 각각 `idempotency_key_duration`, `waiting_room_enqueue_duration`으로 분리해 측정한다. 상태 조회 polling은 진입 부하 결과를 오염시키므로 이 시나리오에 포함하지 않는다.
+
+### 0. 인프라와 애플리케이션 실행
+
+터미널 A에서 프로젝트 루트로 이동해 PostgreSQL과 Redis를 실행한다.
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+docker compose up -d
+docker compose ps
+```
+
+같은 터미널에서 애플리케이션을 실행한다. 아래 값은 한 상품에 동시에 최대 10건만 DB 예약 경로로 진입시킨다.
+
+```bash
+SPRING_PROFILES_ACTIVE=local \
+QUEUE_MAX_CONCURRENT_PROCESSING=10 \
+QUEUE_CLAIM_BATCH_SIZE=10 \
+QUEUE_RECOVERY_BATCH_SIZE=1000 \
+./gradlew :app:bootRun
+```
+
+터미널 B도 반드시 프로젝트 루트로 이동한다. 이후 명령은 모두 터미널 B에서 실행한다.
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+```
+
+### 1. 테스트 데이터와 환경 변수 준비
+
+준비 스크립트는 PostgreSQL에 새 회원 1,000명, OPEN 판매 상품, 재고를 생성하고 회원 ID JSON 파일을 만든다. 출력된 `export` 명령을 `eval`하므로 현재 셸에 k6 실행용 환경 변수가 바로 설정된다.
+
+```bash
+export DATABASE_URL='postgresql://limited_ticketing:limited_ticketing@localhost:5432/limited_ticketing'
+export BASE_URL='http://localhost:8081'
+eval "$(bash load-test/k6/prepare-waiting-room.sh)"
+```
+
+환경 변수와 데이터 파일을 확인한다.
+
+```bash
+printf 'run=%s saleProduct=%s members=%s inventory=%s\n' \
+  "$TEST_RUN_ID" "$SALE_PRODUCT_ID" "$MEMBER_COUNT" "$INVENTORY_QUANTITY"
+test -f "$MEMBER_IDS_FILE"
+jq 'length' "$MEMBER_IDS_FILE"
+curl -fsS "$BASE_URL/api/sale-products/$SALE_PRODUCT_ID" | jq '.data'
+```
+
+기본 SQL에서는 `jq 'length'` 결과가 1,000이어야 한다. `prepare-waiting-room.sh`는 어느 디렉터리에서 호출해도 내부 파일을 절대 경로로 찾지만, 이후 k6 명령의 상대 경로를 위해 프로젝트 루트 실행을 권장한다.
+
+SQL은 실행 시각으로 `TEST_RUN_ID`를 자동 생성한다. DB가 초기화되어 판매 ID가 재사용된 경우를 대비해 준비 스크립트는 새 판매 ID의 `waiting`, `processing`, `sequence` Redis 키도 삭제한다. 이 스크립트는 로컬 전용 PostgreSQL과 Redis에서만 실행해야 한다.
+
+테스트 규모를 바꾸려면 `load-test/k6/sql/prepare-waiting-room.sql` 상단 `params` CTE의 `member_count`, `inventory_quantity` 값을 수정한다. IntelliJ/DataGrip에서는 SQL 파일을 별도 매개변수 없이 그대로 실행할 수 있다.
+
+IDE에서 실행한 경우 결과 행의 `test_run_id`, `sale_product_id`를 각각 `TEST_RUN_ID`, `SALE_PRODUCT_ID` 환경 변수로 사용한다.
+
+### 2. Smoke 테스트
+
+먼저 10건으로 API 계약과 멱등성을 확인한다.
+
+```bash
+k6 run load-test/k6/waiting-room.js \
+  -e BASE_URL="$BASE_URL" \
+  -e SALE_PRODUCT_ID="$SALE_PRODUCT_ID" \
+  -e MEMBER_IDS_FILE="$MEMBER_IDS_FILE" \
+  -e RATE=10 \
+  -e DURATION_SECONDS=1 \
+  -e PRE_ALLOCATED_VUS=10 \
+  -e MAX_VUS=20 \
+  -e P95_THRESHOLD_MS=2000 \
+  -e P99_THRESHOLD_MS=3000 \
+  -e VERIFY_IDEMPOTENCY=true \
+  --summary-export="load-test/k6/results/waiting-room-smoke-${TEST_RUN_ID}.json"
+```
+
+정상이라면 `waiting_room_accepted_entries=10`, `waiting_room_idempotent_retries=10`, `waiting_room_unexpected_responses=0`, `dropped_iterations=0`이어야 한다. Smoke 실행이 끝난 뒤 같은 fixture로 Load 테스트를 이어서 실행하면 이미 처리된 회원과 재고가 결과에 섞이므로 사용하지 않는다.
+
+### 3. 단계별 부하 테스트
+
+각 실행은 **새 `TEST_RUN_ID`와 새 판매 상품**으로 준비해야 한다. 그렇지 않으면 이전 실행의 활성 구매와 대기열 항목이 결과에 섞인다.
+
+Smoke 이후 Load용 fixture와 환경 변수를 새로 준비한다.
+
+```bash
+eval "$(bash load-test/k6/prepare-waiting-room.sh)"
+printf 'load run=%s saleProduct=%s memberFile=%s\n' \
+  "$TEST_RUN_ID" "$SALE_PRODUCT_ID" "$MEMBER_IDS_FILE"
+```
+
+| 단계 | 설정 | 총 진입 요청 |
+|---|---|---:|
+| Load | `RATE=100`, `DURATION_SECONDS=10` | 1,000 |
+| Stress | `RATE=500`, `DURATION_SECONDS=10` | 5,000 |
+| Spike | `RATE=2000`, `DURATION_SECONDS=5` | 10,000 |
+
+예를 들어 1,000건 Load 테스트는 다음과 같이 실행한다.
+
+```bash
+k6 run load-test/k6/waiting-room.js \
+  -e BASE_URL="$BASE_URL" \
+  -e SALE_PRODUCT_ID="$SALE_PRODUCT_ID" \
+  -e MEMBER_IDS_FILE="$MEMBER_IDS_FILE" \
+  -e RATE=100 \
+  -e DURATION_SECONDS=10 \
+  -e PRE_ALLOCATED_VUS=200 \
+  -e MAX_VUS=1000 \
+  -e P95_THRESHOLD_MS=500 \
+  -e P99_THRESHOLD_MS=1000 \
+  --summary-export="load-test/k6/results/waiting-room-load-${TEST_RUN_ID}.json"
+```
+
+Smoke 테스트는 워밍업되지 않은 첫 요청이 표본 대부분을 차지하므로 완화된 임계값을 사용한다. 성능 비교는 애플리케이션 워밍업 후 Load/Stress/Spike를 각각 3회 수행하고 중앙값과 p95/p99를 기록한다. 목표 요청 수는 `iterations`와 `waiting_room_accepted_entries`가 모두 `RATE * DURATION_SECONDS`인지 확인한다.
+
+Spike 테스트에서 `dropped_iterations`가 발생하면 애플리케이션이 아니라 로컬 k6의 VU 부족일 수 있다. `PRE_ALLOCATED_VUS`와 `MAX_VUS`를 높이되 CPU와 메모리 사용량을 함께 확인한다.
+
+### 4. Redis 처리 슬롯 관찰
+
+부하 테스트 중 별도 터미널에서 실행한다.
+
+```bash
+while true; do
+  printf '%s waiting=' "$(date '+%H:%M:%S')"
+  docker compose exec -T redis redis-cli ZCARD "waiting:sale:$SALE_PRODUCT_ID" | tr -d '\r\n'
+  printf ' processing='
+  docker compose exec -T redis redis-cli ZCARD "processing:sale:$SALE_PRODUCT_ID" | tr -d '\r\n'
+  printf '\n'
+  sleep 1
+done
+```
+
+`processing`은 `QUEUE_MAX_CONCURRENT_PROCESSING`을 초과하지 않아야 한다. `waiting`은 유입 중 증가하고 Worker 처리에 따라 감소해야 한다.
+
+### 5. 최종 정합성 검증
+
+Worker 처리가 끝나 `waiting`과 `processing`이 모두 0이 된 후 검증한다.
+
+```bash
+psql "$DATABASE_URL" \
+  -v sale_product_id="$SALE_PRODUCT_ID" \
+  -f load-test/k6/sql/verify-waiting-room.sql
+
+docker compose exec -T redis redis-cli ZCARD "waiting:sale:$SALE_PRODUCT_ID"
+docker compose exec -T redis redis-cli ZCARD "processing:sale:$SALE_PRODUCT_ID"
+```
+
+- `reservation_queue_entries` 총 수는 k6의 `waiting_room_accepted_entries`와 같아야 한다.
+- `RESERVED` 수는 초기 재고 이하이며, 처리 완료 후에는 초기 재고와 같아야 한다.
+- 나머지 정상 요청은 `SOLD_OUT`이어야 하고 `FAILED`는 0이어야 한다.
+- `available + reserved + sold`는 항상 초기 재고와 같아야 한다.
+- 결제를 수행하지 않았으므로 `reserved`는 `RESERVED` 구매 수, `sold`는 0이어야 한다.

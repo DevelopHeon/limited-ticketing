@@ -1,4 +1,9 @@
-spring:
-  task:
-    scheduling:
-      enabled: false
+limited-ticketing:
+  purchase:
+    expiration:
+      initial-delay: 3600000
+  queue:
+    worker:
+      initial-delay: 3600000
+      recovery-initial-delay: 3600000
+      recovery-batch-size: 2

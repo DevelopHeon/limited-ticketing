@@ -1,6 +1,5 @@
 package com.example.limitedticketing.queue.application.command.service;
 
-import com.example.limitedticketing.queue.application.support.ReservationQueueEntryFinder;
 import com.example.limitedticketing.queue.domain.model.ReservationQueueEntry;
 import com.example.limitedticketing.queue.domain.model.ReservationQueueStatus;
 import com.example.limitedticketing.queue.domain.repository.ReservationQueueEntryRepository;
@@ -14,28 +13,24 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ReservationQueueClaimService {
 
-    private final ReservationQueueEntryFinder reservationQueueEntryFinder;
     private final ReservationQueueEntryRepository reservationQueueEntryRepository;
     private final Clock clock;
 
     public ReservationQueueClaimService(
-        ReservationQueueEntryFinder reservationQueueEntryFinder,
         ReservationQueueEntryRepository reservationQueueEntryRepository,
         Clock clock
     ) {
-        this.reservationQueueEntryFinder = reservationQueueEntryFinder;
         this.reservationQueueEntryRepository = reservationQueueEntryRepository;
         this.clock = clock;
     }
 
     @Transactional
     public Optional<ReservationQueueEntry> claim(UUID queueEntryId) {
-        ReservationQueueEntry entry = reservationQueueEntryFinder.getRequired(queueEntryId);
-        if (entry.getStatus() != ReservationQueueStatus.WAITING) {
-            return Optional.empty();
-        }
-
-        entry.beginProcessing(LocalDateTime.now(clock));
-        return Optional.of(reservationQueueEntryRepository.save(entry));
+        return reservationQueueEntryRepository.findById(queueEntryId)
+            .filter(entry -> entry.getStatus() == ReservationQueueStatus.WAITING)
+            .map(entry -> {
+                entry.beginProcessing(LocalDateTime.now(clock));
+                return reservationQueueEntryRepository.save(entry);
+            });
     }
 }

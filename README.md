@@ -170,6 +170,26 @@ sequenceDiagram
 
 Redis는 대기 순서와 처리 슬롯을 담당하는 보조 저장소입니다. `reservation_queue_entries`가 요청 상태와 멱등성을 영속화하며, Redis 등록 실패나 오래된 `PROCESSING` 상태는 DB 기준 복구 작업으로 다시 처리합니다.
 
+### 대기열 복구와 Redis 키 정리
+
+PostgreSQL이 QueueEntry의 최종 기준이며 Redis는 언제든 DB 상태로 복원할 수 있어야 합니다. 복구 작업은 다음 불일치를 처리합니다.
+
+- DB에는 있지만 Redis에는 없는 WAITING 항목: 상품별 `queue_sequence` keyset cursor로 전체 조회해 다시 등록
+- Redis에는 있지만 DB에는 없는 waiting/processing 항목: 두 ZSET에서 제거
+- Redis claim 시 DB 행이 이미 없거나 WAITING이 아닌 항목: `claim()`이 빈 결과를 반환하고 Worker가 processing 항목 제거
+- `CLOSED` 판매이며 DB에 WAITING/PROCESSING이 없거나 판매 자체가 DB에 없는 경우: `waiting`, `processing`, `sequence` 키 삭제
+
+기존의 단일 `LIMIT 1000` 조회는 첫 배치가 계속 WAITING일 때 다음 배치를 영구적으로 읽지 못했다. 현재는 `QUEUE_RECOVERY_BATCH_SIZE` 단위로 `queue_sequence > cursor` 조건을 반복해 전체 항목을 복구한다. 상세 장애 원인과 정합성 규칙은 [대기열 명세](WAITING_ROOM_SPEC.md)를 참고한다.
+
+Redis 출력 포트는 변경 이유에 따라 분리되어 있다.
+
+- `QueueSequenceGenerator`: 상품별 `INCR` 순번 발급
+- `ReservationQueueStore`: enqueue, claim, requeue, 처리 해제와 순번 조회
+- `ReservationQueueRecoveryStore`: Redis 탐색, 고아 항목 제거와 키 수명 주기 정리
+- `ReservationQueueRedisKeys`: 세 구현체가 공유하는 Redis 키 스키마
+
+waiting에서 processing으로 이동하는 `claimNext()`는 두 ZSET을 Lua로 원자적으로 변경해야 하므로 `ReservationQueueStore`가 하나의 연산으로 유지한다.
+
 ## 비즈니스 규칙
 
 - 활성 회원만 구매할 수 있습니다.
@@ -239,6 +259,15 @@ SPRING_PROFILES_ACTIVE=local ./gradlew :app:bootRun
 
 Flyway가 시작 시 `app/src/main/resources/db/migration`의 스키마를 적용하고 Hibernate는 `ddl-auto=validate`로 매핑 일치 여부만 검사합니다.
 
+대기열 Worker와 복구 작업의 주요 환경 변수는 다음과 같습니다.
+
+| 환경 변수 | 기본값 | 설명 |
+|---|---:|---|
+| `QUEUE_MAX_CONCURRENT_PROCESSING` | 10 | 상품별 동시 DB 예약 처리 수 |
+| `QUEUE_CLAIM_BATCH_SIZE` | 10 | Worker가 한 번에 claim하는 최대 항목 수 |
+| `QUEUE_RECOVERY_BATCH_SIZE` | 1000 | Recovery의 DB keyset 및 존재 확인 배치 크기 |
+| `QUEUE_PROCESSING_TIMEOUT_SECONDS` | 30 | PROCESSING을 중단 상태로 판단하는 시간 |
+
 로컬 프로필에서는 실제 인증 구현 대신 다음 헤더를 사용합니다.
 
 ```text
@@ -268,6 +297,8 @@ X-Admin-Id: admin
 | `GET` | `/api/queue-entries/{id}` | 대기 순번 및 처리 상태 조회 |
 
 요청과 응답의 상세 계약은 Controller 코드 및 [대기열 명세](WAITING_ROOM_SPEC.md)를 참고합니다.
+
+Redis 대기열 테스트 데이터 생성부터 Smoke/Load 실행, Redis 관찰 및 DB 검증까지의 명령은 [k6 부하 테스트 가이드](load-test/k6/README.md)에 정리되어 있습니다.
 
 ## 테스트와 아키텍처 검증
 

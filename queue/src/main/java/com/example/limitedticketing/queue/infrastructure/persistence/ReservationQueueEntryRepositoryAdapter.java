@@ -8,8 +8,10 @@ import com.example.limitedticketing.queue.domain.repository.ReservationQueueEntr
 import com.example.limitedticketing.queue.infrastructure.persistence.entity.ReservationQueueEntryJpaEntity;
 import com.example.limitedticketing.queue.infrastructure.persistence.repository.JpaReservationQueueEntryRepository;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
@@ -71,9 +73,12 @@ public class ReservationQueueEntryRepositoryAdapter implements ReservationQueueE
     }
 
     @Override
-    public List<ReservationQueueEntry> findWaitingEntries(int limit) {
-        return jpaReservationQueueEntryRepository.findByStatusOrderByQueueSequenceAsc(
+    public List<ReservationQueueEntry> findWaitingEntriesAfter(Long saleProductId, long queueSequence, int limit) {
+        return jpaReservationQueueEntryRepository
+            .findBySaleProductIdAndStatusAndQueueSequenceGreaterThanOrderByQueueSequenceAsc(
+                saleProductId,
                 ReservationQueueStatus.WAITING,
+                queueSequence,
                 PageRequest.of(0, limit)
             )
             .stream()
@@ -91,5 +96,21 @@ public class ReservationQueueEntryRepositoryAdapter implements ReservationQueueE
             .stream()
             .map(ReservationQueueEntryJpaEntity::toDomain)
             .toList();
+    }
+
+    @Override
+    public Set<UUID> findExistingIds(Collection<UUID> queueEntryIds) {
+        if (queueEntryIds.isEmpty()) {
+            return Set.of();
+        }
+        return Set.copyOf(jpaReservationQueueEntryRepository.findExistingIds(queueEntryIds));
+    }
+
+    @Override
+    public boolean existsActiveEntry(Long saleProductId) {
+        return jpaReservationQueueEntryRepository.existsBySaleProductIdAndStatusIn(
+            saleProductId,
+            List.of(ReservationQueueStatus.WAITING, ReservationQueueStatus.PROCESSING)
+        );
     }
 }

@@ -2,7 +2,7 @@ import http from 'k6/http';
 import { check } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
 
-const baseUrl = __ENV.BASE_URL || 'http://localhost:8080';
+const baseUrl = __ENV.BASE_URL || 'http://localhost:8081';
 const saleProductId = __ENV.SALE_PRODUCT_ID;
 const memberIds = (__ENV.MEMBER_IDS || '')
   .split(',')

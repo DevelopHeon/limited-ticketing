@@ -1,18 +1,6 @@
-# Limited Ticketing 아키텍처
+# 모듈 경계와 내부 설계
 
-## 1. 시스템 개요
-
-Limited Ticketing은 한정 수량 상품의 판매, 재고 예약, 구매, 결제 시도와 대기열 진입을 다루는 **모듈러 모놀리스**다. 현재 모든 모듈은 하나의 Spring Boot 애플리케이션으로 실행하고 하나의 컨테이너 또는 Pod로 배포한다.
-
-```text
-member + sale + inventory + purchase + payment + purchasewaiting
-                            |
-                         app.jar
-                            |
-                   Container 또는 Pod 하나
-```
-
-Gradle 하위 프로젝트와 Spring Modulith 애플리케이션 모듈은 배포 단위가 아니다. 모듈은 코드 소유권과 의존 방향을 강제하기 위한 경계이며, 독립 배포가 필요한 근거가 생길 때만 서비스 분리를 검토한다.
+전체 실행 구성은 [C4 개요](README.md), 로컬 배치는 [배포 구조](deployment.md)를 참고한다. Gradle 모듈은 하나의 Spring Boot 프로세스 안에 있는 코드 경계다.
 
 ### 핵심 원칙
 
@@ -22,7 +10,19 @@ Gradle 하위 프로젝트와 Spring Modulith 애플리케이션 모듈은 배�
 - HTTP 계약, 모듈 공개 계약, 내부 유스케이스 DTO를 분리한다.
 - 비동기 처리로 바꿔도 구매 멱등성 및 재고의 조건부 원자 갱신을 최종 보호 장치로 유지한다.
 
-## 2. 프로젝트와 모듈 구성
+## 비즈니스 규칙
+
+- 활성 회원만 구매할 수 있습니다.
+- `OPEN` 상태이며 판매 기간 안에 있는 상품만 예약할 수 있습니다.
+- 한 사용자는 같은 판매 상품에 `PENDING_PAYMENT` 구매를 동시에 하나만 가질 수 있습니다.
+- `PAID` 구매가 있으면 같은 판매 상품을 다시 구매할 수 없습니다.
+- `EXPIRED` 또는 `CANCELLED` 이후에는 다시 예약할 수 있습니다.
+- 재고 예약 시 `available`이 감소하고 `reserved`가 증가합니다.
+- 결제 승인 시 `reserved`가 감소하고 `sold`가 증가합니다.
+- 결제 실패는 하나의 결제 시도 이력으로 남으며 구매 예약 만료 전까지 새 요청 키로 재시도할 수 있습니다.
+- 구매 취소 또는 만료 시 예약 재고가 가용 재고로 반환됩니다.
+
+## 프로젝트와 모듈 구성
 
 ```text
 limited-ticketing
@@ -51,7 +51,7 @@ limited-ticketing
 
 `purchasewaiting`은 기술적 범용 큐가 아니라 구매 대기 요청의 수명 주기를 소유한다. 구매 대기 접수·조회·처리·복구와 실제 구매 예약의 책임을 분리하고, 예약 자체는 `purchase`의 공개 Facade에 위임한다. Java 패키지와 Gradle 모듈명은 이 업무를 표현하며 기존 HTTP 경로, DB 테이블, Redis 키와 `limited-ticketing.queue` 설정은 유지한다.
 
-## 3. 모듈 경계와 의존 규칙
+## 모듈 경계와 의존 규칙
 
 Gradle 의존성은 컴파일 가능 여부를, Spring Modulith의 `@ApplicationModule`은 허용된 모듈 참조 방향을 검증한다. 두 규칙을 모두 만족해야 다른 모듈의 타입을 사용할 수 있다.
 
@@ -87,7 +87,7 @@ package com.example.limitedticketing.member.application.port.in;
 
 다른 모듈을 호출할 때는 대상 모듈의 `application.port.in` Facade와 `application.port.in.dto`만 참조한다. 대상 모듈의 Domain 모델, JPA Entity, Spring Data Repository, 내부 Command/Query Service는 직접 참조하지 않는다.
 
-## 4. 레이어 구조
+## 레이어 구조
 
 모든 도메인 모듈은 아래 구조를 기본으로 사용한다. 필요한 코드가 없으면 패키지를 미리 만들지 않는다.
 
@@ -162,7 +162,7 @@ HTTP 요청
 
 `Facade`는 공개 계약을 내부 Command/Query로 변환하고 Service에 위임한다. 비즈니스 규칙과 트랜잭션은 Facade가 아니라 Application Service와 Domain에 둔다. `port.out`은 다른 모듈에서 호출하는 API가 아니라, Application이 인프라 구현에 의존하지 않게 하는 출력 포트다.
 
-## 5. DTO, 예외, 시간 규칙
+## DTO, 예외, 시간 규칙
 
 ### DTO 경계
 
@@ -190,7 +190,7 @@ HTTP 요청
 
 기술적으로 동일한 현재 시각은 `app.configuration.time.TimeConfiguration`이 제공하는 JDK `Clock` Bean을 주입받아 사용한다. 테스트는 `Clock.fixed(...)`로 시간을 고정한다. 영업일, 정산 마감처럼 도메인별 시간 정책이 생길 때만 별도 Port를 만든다.
 
-## 6. 영속성, 정합성, 이벤트
+## 영속성, 정합성, 이벤트
 
 ### PostgreSQL과 Flyway
 
@@ -222,216 +222,28 @@ reservation_queue_entries(member_id, purchase_request_key)
 
 ### 도메인 이벤트
 
-상태 변경 후 같은 프로세스 안에서 후속 작업을 수행할 때 Spring Modulith 이벤트를 사용한다. `purchase.domain.event`는 `events` Named Interface로 공개된다.
+구매 예약 이벤트는 트랜잭션 커밋 후 Spring ApplicationEventPublisher로 발행한다. `purchase.domain.event`는 `events` Named Interface로 공개된다.
 
 ```text
 Aggregate 상태 변경
   -> Application Service가 저장
   -> 트랜잭션 커밋 후 Spring 이벤트 발행
-  -> 다른 모듈의 구독 처리
+  -> 구독자가 등록된 경우 같은 프로세스의 후속 처리
 ```
 
 프로세스 내부 이벤트는 외부 메시지 브로커가 아니다. 프로세스 종료에도 반드시 전달되어야 하는 이벤트, 소비자 독립 확장, 재시도와 모니터링이 필요해지면 Transactional Outbox와 Kafka를 별도 단계로 도입한다.
 
-## 7. Redis ZSET 대기열
+현재 운영 코드에는 `PurchaseReserved` 이벤트를 소비하는 후처리 Listener가 없으며, 테스트에서 발행 여부를 검증한다.
 
-### 목적과 경계
+## 구매 대기와 실제 구매의 경계
 
-판매 오픈 직후 모든 요청을 PostgreSQL 재고 행으로 바로 보내지 않기 위해 Redis Sorted Set(ZSET)으로 상품별 대기 순서와 처리 중 요청 수를 제어한다.
+`purchasewaiting`은 구매 대기 접수, 순번, 처리 결과와 복구를 소유한다. Worker는 `purchase`의 공개 Facade로 실제 구매 예약을 실행하며, 구매와 재고의 최종 정합성은 PostgreSQL 트랜잭션이 보호한다.
 
-- Redis: 순번, 대기열 위치, 처리 슬롯
-- PostgreSQL: 대기열 항목의 영속 상태, 멱등성, 구매/재고의 최종 정합성
-- Purchase/Inventory: 실제 구매 예약과 재고 차감의 최종 보호 장치
+Redis ZSET은 대기 순서와 처리 슬롯을 제공한다. API 계약, DB 상태, Redis 키와 장애 복구 절차는 [구매 대기 설계](purchase-waiting.md)를 따른다. 직접 예약 API는 대기열을 거치지 않는 기준선 측정 경로로 유지한다.
 
-직접 예약 API는 성능 기준선 비교를 위해 유지한다. 대기열 API를 호출한 요청만 ZSET 대기열을 거쳐 비동기 예약된다.
+## 검증과 관련 문서
 
-```text
-직접 예약
-POST /api/sale-products/{saleProductId}/purchases
-  -> PurchaseCommandFacade.reserve()
-  -> 즉시 구매/재고 DB 처리
-
-대기열 예약
-POST /api/sale-products/{saleProductId}/queue-entries
-  -> QueueEntry 생성
-  -> Redis 대기열 진입
-  -> 백그라운드 Worker가 순번대로 구매 예약 처리
-```
-
-`queue-entries`는 Redis라는 구현 기술을 드러내는 이름이 아니라, 사용자가 생성하는 **대기열 항목**이라는 도메인 개념이다. Redis를 Kafka나 Redis Streams로 바꿔도 `ReservationQueueEntry`의 상태 조회와 멱등성 계약은 유지한다.
-
-### Redis 키와 DB 상태
-
-```text
-waiting:sale:{saleProductId}      # ZSET, score=queueSequence, member=queueEntryId
-processing:sale:{saleProductId}   # ZSET, score=claim timestamp, member=queueEntryId
-sequence:sale:{saleProductId}     # String, Redis INCR로 순번 생성
-```
-
-```text
-reservation_queue_entries
-- id (UUID)
-- member_id
-- sale_product_id
-- purchase_request_key
-- queue_sequence
-- status: WAITING | PROCESSING | RESERVED | SOLD_OUT | FAILED
-- purchase_id, failure_code
-- created_at, processing_started_at, completed_at
-```
-
-UUID는 DB 저장 전에도 Redis member와 DB 행에서 동일한 식별자가 필요하므로 사용한다. 대기 순번은 서버 시간이 아니라 Redis `INCR` 값으로 만든다. 같은 밀리초의 요청에도 순서를 부여할 수 있다.
-
-### 처리 흐름
-
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant API as Queue Controller/Facade
-    participant DB as PostgreSQL
-    participant R as Redis ZSET
-    participant W as ReservationQueueWorker
-    participant P as Purchase/Inventory
-
-    C->>API: POST queue-entries
-    API->>DB: 동일 memberId + requestKey 조회
-    alt 기존 요청
-        DB-->>API: 기존 QueueEntry 반환
-    else 신규 요청
-        API->>R: INCR sequence:sale:{id}
-        API->>DB: QueueEntry(WAITING) 저장
-        DB-->>API: commit
-        API->>R: ZADD waiting:sale:{id}
-    end
-    API-->>C: 202 Accepted + queueEntryId
-
-    loop dispatch 주기마다
-        W->>DB: WAITING 상품 ID 조회
-        W->>R: Lua claim (waiting -> processing)
-        W->>DB: WAITING -> PROCESSING
-        W->>P: PurchaseCommandFacade.reserve()
-        alt 예약 성공
-            P-->>W: purchaseId
-            W->>DB: QueueEntry -> RESERVED
-        else 재고 소진
-            P-->>W: INSUFFICIENT_INVENTORY
-            W->>DB: QueueEntry -> SOLD_OUT
-        end
-        W->>R: ZREM processing
-    end
-
-    C->>API: GET queue-entries/{id}
-    API->>DB: QueueEntry 조회 및 소유자 검증
-    API->>R: WAITING이면 ZRANK 조회
-    API-->>C: 상태와 참고 순번 반환
-```
-
-`ReservationQueueWorker`는 HTTP 요청 스레드와 별도로 실행되는 Spring 백그라운드 작업자다. 현재는 `@Scheduled`로 항목을 claim하고 `reservationQueueTaskExecutor`에 구매 처리 작업을 제출한다. Lua 스크립트가 처리 중인 ZSET 수를 확인하고 남은 슬롯만큼 `waiting`에서 `processing`으로 이동시키므로, 같은 상품의 DB 예약 경로 동시 진입 수를 제한한다.
-
-### 현재 설정
-
-`app/src/main/resources/application.yml`에서 환경 변수로 조정한다.
-
-| 설정 | 기본값 | 의미 |
-|---|---:|---|
-| `QUEUE_MAX_CONCURRENT_PROCESSING` | `10` | 상품별 Redis processing ZSET에 claim할 최대 항목 수 |
-| `QUEUE_CLAIM_BATCH_SIZE` | `10` | 한 Lua claim 호출에서 가져올 최대 항목 수 |
-| `QUEUE_WORKER_FIXED_DELAY` | `100ms` | 대기열 dispatch 작업 주기 |
-| `QUEUE_WORKER_INITIAL_DELAY` | `1000ms` | 애플리케이션 시작 후 첫 dispatch 지연 |
-| `QUEUE_RECOVERY_FIXED_DELAY` | `5000ms` | Redis/DB 불일치 및 stale processing 복구 주기 |
-| `QUEUE_RECOVERY_INITIAL_DELAY` | `5000ms` | 첫 복구 작업 지연 |
-| `QUEUE_PROCESSING_TIMEOUT_SECONDS` | `30초` | PROCESSING 항목을 stale로 판단하는 시간 |
-
-TaskExecutor의 최대 스레드 수는 현재 `QUEUE_MAX_CONCURRENT_PROCESSING`과 같은 값이다. 단일 판매 상품에서는 Redis 슬롯과 실제 실행 수가 일치한다. 여러 상품이 동시에 열리면 Redis 슬롯은 상품별로 계산되지만 TaskExecutor는 애플리케이션 전체에서 공유되므로, 상품 간 공정성이나 전역 처리량 제한이 필요해지는 시점에 별도 정책을 추가한다.
-
-### 장애와 복구
-
-- DB 커밋 후 Redis `ZADD`가 실패하면 `WAITING` DB 행은 남는다. 복구 작업이 다시 ZSET에 적재한다.
-- Redis claim 이후 프로세스가 중단되면 `PROCESSING` 항목은 timeout 이후 `WAITING`으로 되돌린다.
-- 구매 DB 트랜잭션이 성공하고 QueueEntry 완료 처리 전에 중단돼도, 구매 요청 키의 멱등성이 중복 구매를 막고 이후 재처리를 허용한다.
-- Redis는 보조 저장소이므로 Redis 항목 유실은 보통 영구 요청 유실이 아니라 복구 전까지의 처리 지연이다.
-
-현재 Compose의 Redis는 로컬 개발용이며 AOF, replica, 영속 볼륨을 설정하지 않는다. Redis 컨테이너 재생성 시 ZSET과 sequence가 초기화될 수 있다. DB 대기열은 복구되지만 대기 순서가 섞일 수 있으므로, 운영에서 순번 보존이 중요하면 Redis 영속화와 고가용성 구성을 추가해야 한다.
-
-## 8. 메시지 큐로의 확장 기준
-
-현재는 하나의 애플리케이션 안에서 Spring TaskExecutor가 비동기 작업을 처리한다. Kafka나 Redis Streams는 아직 구현하지 않았다.
-
-다음 요구가 실제로 생길 때 Kafka를 검토한다.
-
-- 구매 처리 워커를 API 애플리케이션과 독립 배포해야 한다.
-- 여러 워커 인스턴스에서 작업을 분산해야 한다.
-- 작업 전달의 재시도, 소비 지연, 소비자별 처리량을 브로커 차원에서 관찰해야 한다.
-- 구매 완료 이벤트를 여러 독립 서비스에 전달해야 한다.
-
-Kafka를 도입하면 ZSET과 `QueueEntry`를 함께 유지한다. ZSET은 사용자 대기 순번, `QueueEntry`는 상태 조회와 멱등성, Kafka는 입장 허용된 작업의 전달을 담당한다.
-
-```text
-ZSET 대기열 입장 허용
-  -> QueueEntry: WAITING -> PROCESSING
-  -> 같은 DB 트랜잭션에서 Outbox 이벤트 저장
-  -> Outbox Publisher가 Kafka Producer로 발행
-  -> Kafka Consumer가 구매 예약 처리
-  -> QueueEntry: RESERVED / SOLD_OUT
-  -> 처리 성공 뒤 offset commit
-```
-
-이 단계에서는 현재 `reservationQueueTaskExecutor`와 Worker의 구매 처리 부분이 Kafka Consumer로 대체된다. ZSET에서 순번을 꺼내 Outbox를 만드는 admission dispatcher와 DB/Redis 복구 작업은 남는다. DB 상태 변경과 Kafka 발행을 직접 연달아 호출하면 중간 장애에서 작업이 유실될 수 있으므로 Outbox 없이 Kafka를 붙이지 않는다.
-
-## 9. 실행 환경과 검증
-
-### 로컬 실행
-
-```bash
-cp .env.example .env
-docker compose up -d
-./gradlew :app:bootRun
-```
-
-기본 연결 값은 다음과 같다.
-
-```text
-PostgreSQL: localhost:5432 / limited_ticketing
-Redis:      localhost:6379
-Application: localhost:8081
-```
-
-`spring.data.redis.repositories.enabled=false`는 Spring Data Redis Repository 자동 구성을 끄는 설정이다. `StringRedisTemplate` 기반의 ZSET 사용을 끄는 설정이 아니다.
-
-로컬 및 테스트 프로필에서는 `X-Member-Id`, `X-Admin-Id`를 임시 인증 수단으로 사용한다. 운영 환경에는 개발용 인증 필터가 등록되지 않으므로 실제 인증/인가 방식을 별도로 구성해야 한다.
-
-### 자동 검증
-
-```bash
-./gradlew check
-```
-
-| 검증 | 목적 |
-|---|---|
-| Checkstyle | 모든 모듈의 main/test에서 `var`와 `setXxx` 메서드 선언 금지 |
-| `ModularityTests` | 전체 업무 모듈 감지, Named Interface를 통한 공개 계약 사용, 금지된 모듈 참조와 순환 의존 검증 |
-| `LayeringArchitectureTests` | 각 업무 모듈 내부의 Domain → 외부 계층, Application → 어댑터 역방향 의존 금지, Presentation의 Facade 우회와 공개 DTO의 내부 타입 노출 검증 |
-| Domain 단위 테스트 | 회원 구매 자격, 판매 시간 경계, 재고 수량 보존, 구매·결제·대기 요청의 허용 상태 전이 검증 |
-| Application Service 단위 테스트 | 각 업무 모듈에서 실제 Domain 객체와 고정 Clock을 사용해 구매 멱등성, 결제 소유권·만료, 대기 결과 분류와 시스템 오류 전파 검증 |
-| `PurchaseConcurrencyIntegrationTest` | 동시 예약에서 정확한 재고 수량과 활성 구매 제약 검증 |
-| `PurchaseLifecycleConcurrencyIntegrationTest` | 동일 구매의 동시 승인·취소 시 상태 전이 단일 성공과 다른 회원의 예약 재고 보호 |
-| `PurchaseReservationIntegrationTest` | 구매 예약과 구매 멱등성 검증 |
-| `PaymentLifecycleIntegrationTest` | 결제 실패/재시도/승인/취소에 따른 구매와 재고 전이 검증 |
-| `SaleProductManagementIntegrationTest` | 판매 생성, 상태 전이, 재고 생성, 목록/상세 조회 검증 |
-| `ReservationQueueIntegrationTest` | Redis ZSET과 PostgreSQL에서 대기열 멱등성, 중복 차단, 예약/품절, 복구 검증 |
-
-`ModularityDocumentationTests`는 Spring Modulith `Documenter`로 코드 기준의 모듈 문서를 생성한다.
-
-```text
-app/build/spring-modulith-docs/
-├── components.puml
-├── module-*.puml
-├── module-*.adoc
-└── all-docs.adoc
-```
-
-Checkstyle 규칙은 `config/checkstyle/checkstyle.xml`이 소유한다. `setXxx` 금지는 프로젝트가 선언한 메서드 이름에 적용하며 외부 라이브러리 메서드 호출은 검사하지 않는다. 의미 있는 업무 동사인지 여부는 코드 리뷰에서 확인한다.
-
-Domain 및 Application Service 단위 테스트는 각 업무 모듈이 소유한다. Service 단위 테스트는 Spring Context 없이 Repository·다른 모듈의 Facade·출력 Port를 대체하고 업무 분기와 허용·금지되는 부수효과를 검증한다. HTTP, 보안, 모듈 연결, 실제 DB·Redis와 트랜잭션·동시성은 실행 모듈 `app`의 통합 테스트에서 검증한다. 단위 테스트의 Mock으로 DB 정합성과 롤백을 검증했다고 간주하지 않는다. 모든 테스트 클래스와 테스트 메서드는 한국어 `@DisplayName`으로 검증하는 정책을 설명한다.
-
-새 모듈, Named Interface, 모듈 간 의존성을 변경할 때는 `./gradlew check`를 실행해 코드 규칙, 아키텍처, 업무 동작과 모듈 문서 생성을 함께 검증한다. `./gradlew test`는 Checkstyle을 실행하지 않는다. Redis 대기열의 세부 선택 근거와 단계별 부하 검증 계획은 [WAITING_ROOM_SPEC.md](WAITING_ROOM_SPEC.md)에 기록한다.
+- 모듈 내부 패키지 의존 방향: [LayeringArchitectureTests](../../app/src/test/java/com/example/limitedticketing/architecture/LayeringArchitectureTests.java)
+- 모듈 간 공개 API와 순환 의존: [ModularityTests](../../app/src/test/java/com/example/limitedticketing/architecture/ModularityTests.java)
+- 코드 규칙과 테스트 배치: [개발 및 검증](../development/testing.md#자동-검증)
+- 메시징 도입 조건: [로드맵](../plans/roadmap.md#메시징-확장-판단-기준)

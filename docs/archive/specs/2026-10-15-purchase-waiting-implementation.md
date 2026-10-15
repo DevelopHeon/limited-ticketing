@@ -1,3 +1,11 @@
+# 구매 대기 구현 스펙 보관본
+
+2026-10-15에 문서 체계를 정리하며 보관했다. 아래 원문은 commit `b545618252b58b41e2107828409418bc3fb215cb`의 `WAITING_ROOM_SPEC.md`다. 원문의 계획·측정 상태는 당시 기록이며 현재 상태를 뜻하지 않는다. 원문 SHA-256: `bbcbdbeaa8ea551244b326c3db89c63a7b8c47d43094c5fa5d1109e03643ba2f`.
+
+현재 계약은 [구매 대기 설계](../../architecture/purchase-waiting.md), 선택 이유는 [ADR 0003](../../adr/0003-purchase-waiting.md), 미완료 검증은 [로드맵](../../plans/roadmap.md), 기존 측정 근거는 [평가 기록](../../evaluations/load-testing/2026-10-15-existing-results.md)을 따른다.
+
+---
+
 # Redis ZSET Waiting Room Specification
 
 ## 1. Goal

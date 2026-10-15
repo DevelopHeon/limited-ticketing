@@ -1,4 +1,6 @@
-# 부하 테스트
+# 부하 테스트 실행
+
+실행 스크립트와 SQL은 [load-test/k6](../../load-test/k6)에 두고, 절차는 이 문서에서 관리한다. 로컬 실행 및 인증 설정은 [개발 및 검증](../development/README.md)을 참고한다. k6, psql과 jq가 필요하다.
 
 아래 명령은 모두 프로젝트 루트에서 실행한다. 현재 위치와 관계없이 다음 명령으로 루트로 이동할 수 있다.
 
@@ -10,7 +12,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 이 시나리오는 판매가 이미 `OPEN` 상태이고 재고가 설정된 상황에서, 서로 다른 회원이 동시에 예약을 요청하는 부하를 측정한다. 각 VU는 한 번만 요청하며, 같은 회원 ID를 재사용하지 않는다.
 
-## 사전 조건
+### 사전 조건
 
 애플리케이션은 개발 인증 필터가 활성화된 `local` 프로필로 실행한다.
 
@@ -46,14 +48,14 @@ export MEMBER_IDS="$(psql "$DATABASE_URL" -Atqc "
 ")"
 ```
 
-## 실행
+### 실행
 
 `VUS`보다 `MEMBER_IDS`의 회원 수가 적으면 스크립트가 즉시 실패한다. 같은 회원을 중복 사용하면 재고 부족이 아닌 활성 구매 정책 충돌도 함께 측정되므로 허용하지 않는다.
 
 ```bash
 mkdir -p load-test/k6/results
 
-k6 run load-test/k6/sale-open.js \
+k6 run --summary-trend-stats="avg,min,med,max,p(90),p(95),p(99)" load-test/k6/sale-open.js \
   -e BASE_URL=http://localhost:8081 \
   -e SALE_PRODUCT_ID=1 \
   -e MEMBER_IDS="$MEMBER_IDS" \
@@ -63,10 +65,10 @@ k6 run load-test/k6/sale-open.js \
 
 스크립트의 `setup` 단계는 각 회원으로 `POST /api/idempotency-keys`를 호출해 서버 발급 `PURCHASE` 키를 준비한다. 실제 동시 예약 구간에는 발급된 키만 사용하므로 키 발급 API의 응답 시간은 `reservation_duration`에 포함하지 않는다.
 
-측정 값은 다음과 같이 해석한다.
+[summary-trend-stats](https://grafana.com/docs/k6/latest/using-k6/k6-options/reference/#summary-trend-stats)에 p99를 명시해 기본 summary에서 누락되는 백분위도 저장한다. 측정 값은 다음과 같이 해석한다.
 
-- `reservation_successes`: 예약 성공 수. 초기 재고와 같아야 한다.
-- `sold_out_responses`: 재고 소진으로 인한 409 수. `VUS - 초기 재고`와 같아야 한다.
+- `reservation_successes`: 예약 성공 수. 초기 재고 이하이며, 유효한 요청 수가 재고 이상이면 초기 재고와 같아야 한다.
+- `sold_out_responses`: 재고 소진으로 인한 409 수. 다른 업무 충돌이 없다면 `max(VUS - 초기 재고, 0)`와 같아야 한다.
 - `unexpected_responses`: 201, 409 이외의 응답 수. 0이어야 한다.
 - `reservation_duration`: 모든 예약 API 응답 시간. p95를 기록한다.
 - `reservation_created_duration`: 성공한 201 예약 응답 시간. 재고 확보·구매 생성 경로의 p95를 기록한다.
@@ -74,14 +76,26 @@ k6 run load-test/k6/sale-open.js \
 
 스크립트는 200(키 발급), 201(예약 성공), 409(재고 소진)을 시나리오상 정상 HTTP 응답으로 지정한다. 따라서 `http_req_failed`는 의도된 409이 아니라 실제 예기치 못한 HTTP 상태만 집계한다.
 
-## DB 락과 낙관적 락 기록
+### DB 락과 낙관적 락 기록
 
-부하 실행 전에 별도 터미널에서 아래 스크립트를 실행하면 PostgreSQL에서 `Lock` 대기 중인 세션 수를 초 단위 CSV로 기록한다.
+부하 실행 전에 별도 터미널에서 PostgreSQL의 `Lock` 대기 세션 수를 초 단위 CSV로 기록한다. 애플리케이션과 측정 세션이 같은 로컬 DB를 사용해야 한다.
 
 ```bash
-DATABASE_URL="$DATABASE_URL" \
-  bash load-test/k6/record-postgresql-locks.sh
+mkdir -p load-test/k6/results
+{
+  printf 'recorded_at,lock_waiters\n'
+  while true; do
+    lock_waiters="$(psql "$DATABASE_URL" -X -qAt -v ON_ERROR_STOP=1 -c "
+      select count(*) from pg_stat_activity
+      where datname = current_database() and wait_event_type = 'Lock'
+    ")"
+    printf '%s,%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$lock_waiters"
+    sleep 1
+  done
+} | tee load-test/k6/results/postgresql-locks.csv
 ```
+
+측정 종료 후 `Ctrl+C`로 기록을 중단하고 실행별 이름으로 CSV를 보관한다.
 
 이 프로젝트의 재고 예약은 `UPDATE ... WHERE available_quantity >= :quantity` 조건부 원자 갱신을 사용하므로 재고 경로에는 `@Version` 기반 낙관적 락이 없다. 따라서 이번 기준선에서 낙관적 락 충돌 수는 0이 정상이다. 추후 낙관적 락을 도입하면 애플리케이션 로그의 `OptimisticLockException`, `ObjectOptimisticLockingFailureException` 발생 횟수도 결과 파일에 함께 기록한다.
 
@@ -127,15 +141,33 @@ cd "$(git rev-parse --show-toplevel)"
 
 ### 1. 테스트 데이터와 환경 변수 준비
 
-준비 스크립트는 PostgreSQL에 새 회원 1,000명, OPEN 판매 상품, 재고를 생성하고 회원 ID JSON 파일을 만든다. 출력된 `export` 명령을 `eval`하므로 현재 셸에 k6 실행용 환경 변수가 바로 설정된다.
+[준비 SQL](../../load-test/k6/sql/prepare-waiting-room.sql)은 새 회원, OPEN 판매 상품과 재고를 생성한다. 기본값은 회원 1,000명과 재고 100개다. SQL 결과로 환경 변수와 회원 ID 파일을 준비한다.
 
 ```bash
 export DATABASE_URL='postgresql://limited_ticketing:limited_ticketing@localhost:5432/limited_ticketing'
 export BASE_URL='http://localhost:8081'
-eval "$(bash load-test/k6/prepare-waiting-room.sh)"
+mkdir -p load-test/k6/results
+
+fixture_row="$(psql "$DATABASE_URL" -X -qAt -F '|' -v ON_ERROR_STOP=1 \
+  -f load-test/k6/sql/prepare-waiting-room.sql)"
+IFS='|' read -r TEST_RUN_ID MEMBER_COUNT INVENTORY_QUANTITY PRODUCT_ID SALE_PRODUCT_ID <<< "$fixture_row"
+export TEST_RUN_ID MEMBER_COUNT INVENTORY_QUANTITY PRODUCT_ID SALE_PRODUCT_ID
+export MEMBER_IDS_FILE="$(pwd)/load-test/k6/results/waiting-room-members-${TEST_RUN_ID}.json"
+
+psql "$DATABASE_URL" -X -qAt -v ON_ERROR_STOP=1 -v test_run_id="$TEST_RUN_ID" \
+  > "$MEMBER_IDS_FILE" <<'SQL'
+SELECT JSON_AGG(id ORDER BY id)
+FROM members
+WHERE external_id LIKE ('waiting-room-' || :'test_run_id' || '-%');
+SQL
+
+docker compose exec -T redis redis-cli DEL \
+  "waiting:sale:$SALE_PRODUCT_ID" \
+  "processing:sale:$SALE_PRODUCT_ID" \
+  "sequence:sale:$SALE_PRODUCT_ID"
 ```
 
-환경 변수와 데이터 파일을 확인한다.
+DB를 초기화해 판매 ID가 재사용될 수 있으므로 해당 판매 ID의 이전 Redis 키를 정리한다. 이 준비 절차는 로컬 전용 DB와 Redis에서만 실행한다.
 
 ```bash
 printf 'run=%s saleProduct=%s members=%s inventory=%s\n' \
@@ -145,20 +177,16 @@ jq 'length' "$MEMBER_IDS_FILE"
 curl -fsS "$BASE_URL/api/sale-products/$SALE_PRODUCT_ID" | jq '.data'
 ```
 
-기본 SQL에서는 `jq 'length'` 결과가 1,000이어야 한다. `prepare-waiting-room.sh`는 어느 디렉터리에서 호출해도 내부 파일을 절대 경로로 찾지만, 이후 k6 명령의 상대 경로를 위해 프로젝트 루트 실행을 권장한다.
+기본 SQL에서는 회원 ID 파일 길이가 1,000이어야 한다. `MEMBER_IDS_FILE`은 k6의 파일 해석 위치와 무관하게 읽을 수 있도록 절대 경로를 사용한다.
 
-SQL은 실행 시각으로 `TEST_RUN_ID`를 자동 생성한다. DB가 초기화되어 판매 ID가 재사용된 경우를 대비해 준비 스크립트는 새 판매 ID의 `waiting`, `processing`, `sequence` Redis 키도 삭제한다. 이 스크립트는 로컬 전용 PostgreSQL과 Redis에서만 실행해야 한다.
-
-테스트 규모를 바꾸려면 `load-test/k6/sql/prepare-waiting-room.sql` 상단 `params` CTE의 `member_count`, `inventory_quantity` 값을 수정한다. IntelliJ/DataGrip에서는 SQL 파일을 별도 매개변수 없이 그대로 실행할 수 있다.
-
-IDE에서 실행한 경우 결과 행의 `test_run_id`, `sale_product_id`를 각각 `TEST_RUN_ID`, `SALE_PRODUCT_ID` 환경 변수로 사용한다.
+규모를 바꿀 때는 준비 SQL 상단 `params` CTE의 `member_count`, `inventory_quantity`를 수정한다. IntelliJ/DataGrip에서 SQL을 실행했다면 결과 행의 `test_run_id`, `sale_product_id` 등을 위 환경 변수에 설정하고 회원 ID 파일 생성 및 Redis 키 정리부터 진행한다.
 
 ### 2. Smoke 테스트
 
 먼저 10건으로 API 계약과 멱등성을 확인한다.
 
 ```bash
-k6 run load-test/k6/waiting-room.js \
+k6 run --summary-trend-stats="avg,min,med,max,p(90),p(95),p(99)" load-test/k6/waiting-room.js \
   -e BASE_URL="$BASE_URL" \
   -e SALE_PRODUCT_ID="$SALE_PRODUCT_ID" \
   -e MEMBER_IDS_FILE="$MEMBER_IDS_FILE" \
@@ -178,13 +206,7 @@ k6 run load-test/k6/waiting-room.js \
 
 각 실행은 **새 `TEST_RUN_ID`와 새 판매 상품**으로 준비해야 한다. 그렇지 않으면 이전 실행의 활성 구매와 대기열 항목이 결과에 섞인다.
 
-Smoke 이후 Load용 fixture와 환경 변수를 새로 준비한다.
-
-```bash
-eval "$(bash load-test/k6/prepare-waiting-room.sh)"
-printf 'load run=%s saleProduct=%s memberFile=%s\n' \
-  "$TEST_RUN_ID" "$SALE_PRODUCT_ID" "$MEMBER_IDS_FILE"
-```
+Smoke 이후에는 [테스트 데이터와 환경 변수 준비](#1-테스트-데이터와-환경-변수-준비)를 다시 수행해 Load용 fixture를 만든다. Stress·Spike는 필요한 회원 수 이상으로 SQL의 `member_count`를 바꾸고 매번 새 fixture를 준비한다.
 
 | 단계 | 설정 | 총 진입 요청 |
 |---|---|---:|
@@ -195,7 +217,7 @@ printf 'load run=%s saleProduct=%s memberFile=%s\n' \
 예를 들어 1,000건 Load 테스트는 다음과 같이 실행한다.
 
 ```bash
-k6 run load-test/k6/waiting-room.js \
+k6 run --summary-trend-stats="avg,min,med,max,p(90),p(95),p(99)" load-test/k6/waiting-room.js \
   -e BASE_URL="$BASE_URL" \
   -e SALE_PRODUCT_ID="$SALE_PRODUCT_ID" \
   -e MEMBER_IDS_FILE="$MEMBER_IDS_FILE" \
@@ -208,7 +230,7 @@ k6 run load-test/k6/waiting-room.js \
   --summary-export="load-test/k6/results/waiting-room-load-${TEST_RUN_ID}.json"
 ```
 
-Smoke 테스트는 워밍업되지 않은 첫 요청이 표본 대부분을 차지하므로 완화된 임계값을 사용한다. 성능 비교는 애플리케이션 워밍업 후 Load/Stress/Spike를 각각 3회 수행하고 중앙값과 p95/p99를 기록한다. 목표 요청 수는 `iterations`와 `waiting_room_accepted_entries`가 모두 `RATE * DURATION_SECONDS`인지 확인한다.
+Smoke는 소수 요청의 기능 확인이 목적이라 완화된 임계값을 사용하며, 성능 기준선으로 사용하지 않는다. 성능 비교는 애플리케이션 워밍업 후 Load/Stress/Spike를 각각 3회 수행하고 중앙값과 p95/p99를 기록한다. 목표 요청 수는 `iterations`와 `waiting_room_accepted_entries`가 모두 `RATE * DURATION_SECONDS`인지 확인한다.
 
 Spike 테스트에서 `dropped_iterations`가 발생하면 애플리케이션이 아니라 로컬 k6의 VU 부족일 수 있다. `PRE_ALLOCATED_VUS`와 `MAX_VUS`를 높이되 CPU와 메모리 사용량을 함께 확인한다.
 
@@ -243,7 +265,12 @@ docker compose exec -T redis redis-cli ZCARD "processing:sale:$SALE_PRODUCT_ID"
 ```
 
 - `reservation_queue_entries` 총 수는 k6의 `waiting_room_accepted_entries`와 같아야 한다.
-- `RESERVED` 수는 초기 재고 이하이며, 처리 완료 후에는 초기 재고와 같아야 한다.
+- `RESERVED` 수는 초기 재고 이하이며, 수락된 유효 요청이 재고 이상이고 모든 처리가 완료되면 초기 재고와 같아야 한다.
 - 나머지 정상 요청은 `SOLD_OUT`이어야 하고 `FAILED`는 0이어야 한다.
 - `available + reserved + sold`는 항상 초기 재고와 같아야 한다.
 - 결제를 수행하지 않았으므로 `reserved`는 `RESERVED` 구매 수, `sold`는 0이어야 한다.
+
+
+## 측정 결과 관리
+
+실행별 결과는 [평가 기록](../evaluations/load-testing/2026-10-15-existing-results.md)에 조건·원본 식별자·한계와 함께 남긴다. 기존 결과를 덮어쓰지 않는다. 다음 측정과 완료 기준은 [로드맵](../plans/roadmap.md)을 따른다.

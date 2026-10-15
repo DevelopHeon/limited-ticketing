@@ -1,3 +1,4 @@
+import copy
 import json
 import tempfile
 import unittest
@@ -32,6 +33,22 @@ def verification():
             "completionSeconds": {"count": 10, "p95": 5}}
 
 
+def observations():
+    point = {'status': 'success', 'data': {'result': [{
+        'metric': {'job': 'flash-sale', 'instance': 'host.docker.internal:18081'},
+        'values': [[1, '1'], [6, '1']]}]}}
+    result = {name: copy.deepcopy(point) for name in ('up', 'httpCount', 'httpBuckets', 'heap', 'threads', 'hikari')}
+    for name in ('httpCount', 'httpBuckets'):
+        result[name]['data']['result'][0]['metric'].update(
+            uri='/api/sale-products/{saleProductId}/queue-entries', method='POST')
+        result[name]['data']['result'][0]['values'] = [[1, '20'], [6, '30']]
+    return result
+
+
+def observed(data, errors=0):
+    return observations_complete(data, errors, 'host.docker.internal:18081', 'waiting')
+
+
 def evaluate(data=None, db=None, observations=True):
     return evaluate_results("waiting", 10, 3, data if data is not None else summary(),
                             db if db is not None else verification(), observations)
@@ -61,15 +78,50 @@ class BaselineResultTest(unittest.TestCase):
             with second.exclusive_run():
                 pass
 
+    def test_redis_failure_preserves_database_evidence(self):
+        """Redis 조회가 실패해도 구매·재고 원장은 보존하고 정합성은 불완전으로 남긴다."""
+        with patch.dict('os.environ', {'DATABASE_URL': 'postgresql://test:test@localhost/test'}):
+            environment = Environment('http://localhost:18081', 'http://localhost', 'test')
+        fixture = {'saleProductId': 1}
+        db = verification()
+        del db['redis']
+        with patch.object(environment, 'sql', return_value=json.dumps(db)), patch.object(
+                environment, 'redis_count', side_effect=TimeoutError('Redis unavailable')):
+            snapshot = environment.verify(fixture)
+        self.assertEqual(snapshot['inventory'], db['inventory'])
+        self.assertEqual(snapshot['purchases'], db['purchases'])
+        self.assertEqual(snapshot['redisError'], 'TimeoutError')
+        self.assertEqual(evaluate(db=snapshot)['integrity'], 'INCOMPLETE')
+        self.assertEqual(environment.cleanup(fixture, snapshot)['status'], 'SKIPPED')
+
     def test_up_alone_does_not_prove_observability(self):
         """scrape UP만 있고 업무·자원 시계열이 없으면 관측 완료로 판정하지 않는다."""
-        point = {'status': 'success', 'data': {'result': [{'values': [[1, '1']]}]}}
-        complete = {name: point for name in ('up', 'httpCount', 'httpBuckets', 'heap', 'threads', 'hikari')}
-        self.assertTrue(observations_complete(complete, 0))
-        self.assertFalse(observations_complete({'up': point}, 0))
-        self.assertFalse(observations_complete(complete, 1))
-        complete['up'] = {'status': 'success', 'data': {'result': [{'values': [[1, '0']]}]}}
-        self.assertFalse(observations_complete(complete, 0))
+        complete = observations()
+        self.assertTrue(observed(complete))
+        self.assertFalse(observed({'up': complete['up']}))
+        self.assertFalse(observed(complete, 1))
+        complete['up']['data']['result'][0]['values'] = [[1, '0']]
+        self.assertFalse(observed(complete))
+
+    def test_another_application_cannot_satisfy_observability(self):
+        """기존 8081 앱의 지표로 측정 중인 18081 앱의 관측을 통과시키지 않는다."""
+        data = observations()
+        for series in data.values():
+            series['data']['result'][0]['metric']['instance'] = 'host.docker.internal:8081'
+        self.assertFalse(observed(data))
+
+    def test_health_only_cannot_satisfy_business_observability(self):
+        """측정 대상이 같아도 health 요청만 있는 지표를 업무 API 계측으로 인정하지 않는다."""
+        data = observations()
+        for name in ('httpCount', 'httpBuckets'):
+            data[name]['data']['result'][0]['metric'].update(uri='/actuator/health', method='GET')
+        self.assertFalse(observed(data))
+
+    def test_unchanged_business_counter_is_not_measurement_evidence(self):
+        """과거 업무 요청의 변하지 않는 counter만으로 현재 부하가 계측되었다고 판정하지 않는다."""
+        data = observations()
+        data['httpCount']['data']['result'][0]['values'] = [[1, '20'], [6, '20']]
+        self.assertFalse(observed(data))
 
     def test_fast_acceptance_does_not_hide_slow_completion(self):
         """접수는 빨라도 최종 결과가 60초 목표를 넘으면 지연 목표 미달을 보고한다."""

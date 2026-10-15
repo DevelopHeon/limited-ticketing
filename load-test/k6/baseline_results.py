@@ -87,6 +87,9 @@ def evaluate_results(flow, expected, inventory, summary, verification, observati
         if queue.get('WAITING', 0) + queue.get('PROCESSING', 0) > 0:
             result['integrity'] = 'INCOMPLETE'
             result['reasons'].append('Requests remain active after drain deadline')
+        elif verification.get('redisError') or 'redis' not in verification:
+            result['integrity'] = 'INCOMPLETE'
+            result['reasons'].append('Redis verification unavailable; database evidence retained')
         elif not valid or redis != {'waiting': 0, 'processing': 0}:
             result['integrity'] = 'FAIL'
             result['reasons'].append('Final inventory, purchase or queue relationship mismatch')
@@ -111,13 +114,23 @@ def result_exit_code(verdicts):
     return 1 if 'FAIL' in statuses else 0
 
 
-def observations_complete(observations, sample_errors):
+def observations_complete(observations, sample_errors, expected_target, flow):
     required = ('up', 'httpCount', 'httpBuckets', 'heap', 'threads', 'hikari')
     if sample_errors or any(data.get('status') != 'success' for data in observations.values()):
         return False
+    endpoint = 'purchases' if flow == 'direct' else 'queue-entries'
+    uri = '/api/sale-products/{saleProductId}/' + endpoint
     for name in required:
-        rows = observations.get(name, {}).get('data', {}).get('result', [])
+        rows = [row for row in observations.get(name, {}).get('data', {}).get('result', [])
+                if row.get('metric', {}).get('instance') == expected_target
+                and row.get('metric', {}).get('job') == 'flash-sale']
+        if name in ('httpCount', 'httpBuckets'):
+            rows = [row for row in rows if row['metric'].get('uri') == uri
+                    and row['metric'].get('method') == 'POST']
         values = [value for row in rows for value in row.get('values', [])]
         if not values or (name == 'up' and any(float(value[1]) != 1 for value in values)):
+            return False
+        if name == 'httpCount' and not any(len(row.get('values', [])) >= 2
+                and float(row['values'][-1][1]) > float(row['values'][0][1]) for row in rows):
             return False
     return True

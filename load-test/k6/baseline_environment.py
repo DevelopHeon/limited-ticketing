@@ -30,6 +30,9 @@ class Environment:
     def __init__(self, base_url, prometheus_url, compose_project):
         self.base_url = base_url.rstrip('/')
         self.prometheus_url = prometheus_url.rstrip('/')
+        target = urllib.parse.urlsplit(self.base_url)
+        host = 'host.docker.internal' if target.hostname in ('localhost', '127.0.0.1', '::1') else target.hostname
+        self.metrics_target = f'{host}:{target.port or (443 if target.scheme == "https" else 80)}'
         self.compose = ['docker', 'compose', '-p', compose_project]
         if not os.environ.get('DATABASE_URL'):
             raise ValueError('DATABASE_URL is required for the dedicated test database')
@@ -110,7 +113,10 @@ class Environment:
     def verify(self, fixture):
         data = json.loads(self.sql(file=ROOT / 'load-test/k6/sql/verify-flash-sale.sql',
                                    variables={'fixture': json.dumps(fixture)}))
-        data['redis'] = {key: self.redis_count(fixture['saleProductId'], key) for key in ('waiting', 'processing')}
+        try:
+            data['redis'] = {key: self.redis_count(fixture['saleProductId'], key) for key in ('waiting', 'processing')}
+        except Exception as error:
+            data['redisError'] = type(error).__name__
         data['recordedAt'] = utc_now()
         return data
 
@@ -145,6 +151,8 @@ class Environment:
             raise RuntimeError('Dedicated database has active waiting entries or pending purchases; resolve their owning run first')
 
     def cleanup(self, fixture, snapshot):
+        if snapshot.get('redisError'):
+            return {'status': 'SKIPPED', 'reason': 'Redis evidence unavailable; fixture retained for investigation'}
         if sum(snapshot.get('queue', {}).get(key, 0) for key in ('WAITING', 'PROCESSING')):
             return {'status': 'SKIPPED', 'reason': 'Active requests retained for investigation'}
         allowed = {item['memberId'] for item in fixture['members']}
@@ -202,7 +210,8 @@ class Environment:
                 'workerConfigSource': 'operator launch environment and repository defaults; not read from a remote config endpoint',
                 'declaredJvmOptions': os.environ.get('BASELINE_JVM_OPTIONS', 'UNRECORDED'),
                 'appProfile': 'local', 'composeProject': self.compose[-1],
-                'baseUrl': self.base_url, 'prometheusUrl': self.prometheus_url}
+                'baseUrl': self.base_url, 'prometheusUrl': self.prometheus_url,
+                'expectedMetricsTarget': self.metrics_target}
 
     def prometheus(self, start, end):
         queries = {'up': 'up{job="flash-sale"}',

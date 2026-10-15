@@ -35,6 +35,7 @@ def drain(environment, fixture, deadline_seconds=120):
 def prepare(environment, run, name, count, inventory):
     fixture = environment.prepare_fixture(run.manifest['runId'] + '-' + name, count, inventory)
     write_json(run.path / f'{name}.json', fixture)
+    # shortcut: key-preparation failure retains the saved fixture; add owned cleanup if local failures accumulate.
     try:
         if environment.ensure_fixture_target(fixture).get('status') != 'OPEN':
             raise RuntimeError('Prepared fixture is not OPEN at the target API')
@@ -92,7 +93,7 @@ def execute(args):
     run_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + args.flow + '-' + uuid.uuid4().hex[:8]
     output_root = Path(args.output_root).resolve()
     metadata = {'flow': args.flow, 'scenario': args.scenario, 'input': settings,
-                'httpTimeoutSeconds': 10, 'drainDeadlineSeconds': 120}
+                'httpTimeoutSeconds': 10, 'drainDeadlineSeconds': 120, 'warmupScrapeWaitSeconds': 5}
     with RunArtifacts(output_root, run_id, metadata) as run, ExitStack() as resources:
         print(f'Run artifacts: {run.path}', flush=True)
         environment = None
@@ -111,6 +112,8 @@ def execute(args):
             write_json(run.path / 'manifest.json', run.manifest)
             warmup(environment, run, args.flow)
             environment.ensure_idle()
+            # Let warmup counters be scraped before the measured flow increments them.
+            time.sleep(5)
             fixture = prepare(environment, run, 'fixture', settings['members'], settings['inventory'])
             environment.ensure_idle()
             sampler = Sampler(environment, fixture['saleProductId'], run.path / 'samples.csv')
@@ -137,10 +140,10 @@ def execute(args):
                 if not interrupted:
                     time.sleep(5)
                 end = time.time()
-                run.manifest['observationRange'] = {'start': start, 'end': end, 'scrapeGraceSeconds': 5}
+                run.manifest['observationRange'] = {'start': start - 5, 'measurementStart': start, 'end': end, 'scrapeGraceSeconds': 5}
                 if sampler:
                     sampler.stop()
-                observations = environment.prometheus(start, end)
+                observations = environment.prometheus(start - 5, end)
                 write_json(run.path / 'prometheus.json', observations)
             else:
                 observations = {}
@@ -149,7 +152,7 @@ def execute(args):
                 summary = json.loads(summary_path.read_text()) if summary_path.exists() else {}
             except ValueError:
                 summary = {}
-            observed = bool(sampler) and observations_complete(observations, sampler.errors)
+            observed = bool(sampler) and observations_complete(observations, sampler.errors, environment.metrics_target, args.flow)
             verdicts = evaluate_results(args.flow, settings['members'], settings['inventory'], summary, snapshot, observed)
             if interrupted or process_exit not in (0, 99):
                 verdicts['workload'] = 'INCOMPLETE'

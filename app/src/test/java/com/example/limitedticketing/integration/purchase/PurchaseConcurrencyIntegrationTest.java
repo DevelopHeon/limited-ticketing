@@ -11,6 +11,7 @@ import com.example.limitedticketing.sale.domain.repository.ProductRepository;
 import com.example.limitedticketing.sale.domain.repository.SaleProductRepository;
 import com.example.limitedticketing.shared.vo.Money;
 import com.example.limitedticketing.shared.vo.SalePeriod;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -21,6 +22,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.assertj.core.api.SoftAssertions;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -31,16 +33,19 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.assertj.core.api.InstanceOfAssertFactories.LONG;
 
 @Testcontainers
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@DisplayName("구매 예약의 동시성과 멱등성 통합 검증")
 class PurchaseConcurrencyIntegrationTest {
 
     private static final int REQUEST_COUNT = 100;
@@ -51,6 +56,9 @@ class PurchaseConcurrencyIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -75,15 +83,17 @@ class PurchaseConcurrencyIntegrationTest {
     }
 
     @Test
+    @DisplayName("회원 백 명이 동시에 구매해도 가용 재고 수만큼만 예약한다")
     void reservesOnlyAvailableInventoryWhenOneHundredMembersRequestConcurrently() throws Exception {
         Fixture fixture = createFixture(INITIAL_INVENTORY_QUANTITY);
         List<Long> memberIds = createMembers(REQUEST_COUNT);
 
-        List<Integer> statusCodes = reserveConcurrently(
+        List<ReservationResponse> responses = reserveConcurrently(
             fixture.saleProductId(),
             memberIds,
             memberId -> "purchase-request-" + memberId
         );
+        List<Integer> statusCodes = responses.stream().map(ReservationResponse::status).toList();
 
         Inventory inventory = inventoryRepository.findById(fixture.inventoryId()).orElseThrow();
         long pendingPurchaseCount = countPurchasesByStatus(fixture.saleProductId(), PurchaseStatus.PENDING_PAYMENT);
@@ -98,9 +108,6 @@ class PurchaseConcurrencyIntegrationTest {
             softly.assertThat(inventory.getAvailableQuantity()).isZero();
             softly.assertThat(inventory.getReservedQuantity()).isEqualTo(INITIAL_INVENTORY_QUANTITY);
             softly.assertThat(inventory.getSoldQuantity()).isZero();
-            softly.assertThat(inventory.getAvailableQuantity()).isGreaterThanOrEqualTo(0);
-            softly.assertThat(inventory.getReservedQuantity()).isGreaterThanOrEqualTo(0);
-            softly.assertThat(inventory.getSoldQuantity()).isGreaterThanOrEqualTo(0);
             softly.assertThat(
                 inventory.getAvailableQuantity() + inventory.getReservedQuantity() + inventory.getSoldQuantity()
             ).isEqualTo(INITIAL_INVENTORY_QUANTITY);
@@ -108,22 +115,25 @@ class PurchaseConcurrencyIntegrationTest {
     }
 
     @Test
+    @DisplayName("동일 회원과 요청 키의 동시 재시도는 같은 구매 식별자를 반환하고 한 번만 예약한다")
     void returnsSameReservationWhenSameMemberRetriesWithSameRequestKeyConcurrently() throws Exception {
         Fixture fixture = createFixture(INITIAL_INVENTORY_QUANTITY);
         Long memberId = createMembers(1).get(0);
         List<Long> memberIds = java.util.Collections.nCopies(REQUEST_COUNT, memberId);
 
-        List<Integer> statusCodes = reserveConcurrently(
+        List<ReservationResponse> responses = reserveConcurrently(
             fixture.saleProductId(),
             memberIds,
             ignored -> "purchase-request-idempotent"
         );
+        List<Integer> statusCodes = responses.stream().map(ReservationResponse::status).toList();
 
         Inventory inventory = inventoryRepository.findById(fixture.inventoryId()).orElseThrow();
         long activePurchaseCount = countActivePurchases(memberId, fixture.saleProductId());
         SoftAssertions.assertSoftly(softly -> {
-            softly.assertThat(statusCodes).allMatch(status -> status < HttpStatus.INTERNAL_SERVER_ERROR.value());
-            softly.assertThat(statusCodes).allMatch(status -> status == HttpStatus.CREATED.value());
+            softly.assertThat(statusCodes).containsOnly(HttpStatus.CREATED.value());
+            softly.assertThat(responses.stream().map(ReservationResponse::purchaseId).distinct().toList())
+                .singleElement(LONG).isPositive();
             softly.assertThat(activePurchaseCount).isEqualTo(1);
             softly.assertThat(inventory.getAvailableQuantity()).isEqualTo(INITIAL_INVENTORY_QUANTITY - 1);
             softly.assertThat(inventory.getReservedQuantity()).isEqualTo(1);
@@ -131,7 +141,7 @@ class PurchaseConcurrencyIntegrationTest {
         });
     }
 
-    private List<Integer> reserveConcurrently(
+    private List<ReservationResponse> reserveConcurrently(
         Long saleProductId,
         List<Long> memberIds,
         java.util.function.Function<Long, String> purchaseRequestKeyProvider
@@ -141,7 +151,7 @@ class PurchaseConcurrencyIntegrationTest {
         CountDownLatch start = new CountDownLatch(1);
 
         try {
-            List<Future<Integer>> results = new ArrayList<>();
+            List<Future<ReservationResponse>> results = new ArrayList<>();
             for (Long memberId : memberIds) {
                 results.add(executor.submit(() -> {
                     ready.countDown();
@@ -149,12 +159,13 @@ class PurchaseConcurrencyIntegrationTest {
                         throw new IllegalStateException("Concurrent reservation start timed out");
                     }
 
-                    return mockMvc.perform(post("/api/sale-products/{saleProductId}/purchases", saleProductId)
+                    MvcResult result = mockMvc.perform(post("/api/sale-products/{saleProductId}/purchases", saleProductId)
                             .header("X-Member-Id", memberId)
                             .header("Idempotency-Key", purchaseRequestKeyProvider.apply(memberId)))
-                        .andReturn()
-                        .getResponse()
-                        .getStatus();
+                        .andReturn();
+                    long purchaseId = objectMapper.readTree(result.getResponse().getContentAsString())
+                        .path("data").path("purchaseId").asLong();
+                    return new ReservationResponse(result.getResponse().getStatus(), purchaseId);
                 }));
             }
 
@@ -163,11 +174,11 @@ class PurchaseConcurrencyIntegrationTest {
             }
             start.countDown();
 
-            List<Integer> statusCodes = new ArrayList<>();
-            for (Future<Integer> result : results) {
-                statusCodes.add(result.get(30, TimeUnit.SECONDS));
+            List<ReservationResponse> responses = new ArrayList<>();
+            for (Future<ReservationResponse> result : results) {
+                responses.add(result.get(30, TimeUnit.SECONDS));
             }
-            return statusCodes;
+            return responses;
         } finally {
             start.countDown();
             executor.shutdownNow();
@@ -219,5 +230,8 @@ class PurchaseConcurrencyIntegrationTest {
     }
 
     private record Fixture(Long saleProductId, Long inventoryId) {
+    }
+
+    private record ReservationResponse(int status, long purchaseId) {
     }
 }

@@ -31,11 +31,11 @@ flowchart LR
         Inventory["inventory"]
         Purchase["purchase"]
         Payment["payment"]
-        Queue["queue"]
+        PurchaseWaiting["purchasewaiting"]
 
-        Queue --> Member
-        Queue --> Sale
-        Queue --> Purchase
+        PurchaseWaiting --> Member
+        PurchaseWaiting --> Sale
+        PurchaseWaiting --> Purchase
         Purchase --> Member
         Purchase --> Sale
         Purchase --> Inventory
@@ -45,7 +45,7 @@ flowchart LR
     end
 
     App --> PostgreSQL[(PostgreSQL)]
-    Queue --> Redis[(Redis ZSET)]
+    PurchaseWaiting --> Redis[(Redis ZSET)]
 ```
 
 Gradle 하위 프로젝트는 코드 소유권과 의존 방향을 구분하지만 각각의 배포 단위는 아닙니다. 현재 `app` 모듈이 모든 도메인 모듈을 조립하고 하나의 실행 파일로 배포됩니다. 독립적인 확장 및 배포가 필요하다는 근거가 생길 때만 서비스 분리를 검토합니다.
@@ -61,10 +61,12 @@ limited-ticketing
 ├── inventory    # 가용/예약/판매 재고 전이
 ├── purchase     # 구매 예약, 취소, 만료, 완료
 ├── payment      # 결제 시도 이력과 승인/실패
-└── queue        # Redis 대기열, 비동기 예약과 처리 상태
+└── purchasewaiting # 구매 대기 접수, 순번, 처리 결과와 복구
 ```
 
 다른 모듈은 대상 모듈의 `application.port.in`에 공개된 Facade와 DTO만 사용합니다. Spring Modulith의 `@ApplicationModule(allowedDependencies = ...)`과 `@NamedInterface`로 허용된 참조를 명시하고 테스트에서 순환 의존 및 내부 구현 접근을 검증합니다.
+
+`purchasewaiting`은 구매를 기다리는 요청의 상태를 소유하며, 실제 구매 예약은 `purchase`의 공개 API에 위임합니다. Redis ZSET과 Worker는 구매 대기를 구현하는 기술입니다. HTTP의 `queue-entries`, DB 테이블과 `limited-ticketing.queue` 설정 키는 기존 계약을 유지합니다.
 
 ### 레이어 구성
 
@@ -302,21 +304,27 @@ Redis 대기열 테스트 데이터 생성부터 Smoke/Load 실행, Redis 관찰
 
 ## 테스트와 아키텍처 검증
 
-Docker가 실행된 상태에서 전체 테스트를 실행합니다. 통합 테스트는 Testcontainers로 PostgreSQL과 Redis를 구동합니다.
+Docker가 실행된 상태에서 코드 규칙과 전체 테스트를 검증합니다. 통합 테스트는 Testcontainers로 PostgreSQL과 Redis를 구동합니다.
 
 ```bash
-./gradlew test
+./gradlew check
 ```
 
 주요 검증 범위는 다음과 같습니다.
 
 - Domain 상태 전이와 불변식 단위 테스트
+- 각 업무 모듈의 Application Service에서 멱등성, 결제 자격과 대기 처리 결과를 검증하는 단위 테스트
 - 구매 및 결제 멱등성 통합 테스트
-- 재고 동시 예약 및 사용자 중복 요청 테스트
+- 재고 동시 예약, 사용자 중복 요청과 동일 구매의 동시 상태 전이 테스트
 - 판매 생성, 상태 전이와 조회 테스트
 - Redis 대기열 진입, 예약, 품절 및 장애 복구 테스트
 - Spring Modulith 모듈 의존 방향과 Named Interface 검증
-- 레이어별 금지 의존성 검증
+- 각 모듈 내부의 패키지 의존 방향 검증
+- Checkstyle로 main/test의 `var`와 `setXxx` 메서드 선언 금지
+
+외부 라이브러리의 `setXxx` 호출은 허용합니다. 의미 있는 업무 동사인지 여부는 코드 리뷰에서 확인합니다. 테스트만 실행하려면 `./gradlew test`를 사용하며, 이 명령에는 Checkstyle이 포함되지 않습니다.
+
+각 업무 모듈은 Domain과 Application Service 단위 테스트를 소유하고, `app`은 여러 모듈과 실제 저장소를 연결하는 통합 테스트를 소유합니다. 모든 테스트 클래스와 테스트 메서드에 한국어 `@DisplayName`을 작성합니다. 테스트 배치와 검증 범위의 상세 기준은 [아키텍처 문서](ARCHITECTURE.md#자동-검증)를 참고합니다.
 
 Spring Modulith 문서는 테스트 실행 시 다음 경로에 생성됩니다.
 

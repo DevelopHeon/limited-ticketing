@@ -6,4 +6,7 @@ dependencies {
     compileOnly rootProject.libraries.springDataJpa
     compileOnly rootProject.libraries.bootValidation
     compileOnly rootProject.libraries.bootWeb
+
+    testImplementation rootProject.libraries.bootTest
+    testRuntimeOnly rootProject.libraries.junitPlatform
 }

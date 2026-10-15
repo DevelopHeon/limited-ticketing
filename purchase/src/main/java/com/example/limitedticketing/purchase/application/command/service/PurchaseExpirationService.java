@@ -38,10 +38,10 @@ public class PurchaseExpirationService {
 
     private int expire(Purchase purchase, LocalDateTime now) {
         purchase.expire(now);
+        purchaseRepository.transitionFromPending(purchase);
         inventoryCommandFacade.releaseReservation(
             new ReleaseInventoryReservationInput(purchase.getSaleProductId(), purchase.getQuantity())
         );
-        purchaseRepository.save(purchase);
 
         return 1;
     }

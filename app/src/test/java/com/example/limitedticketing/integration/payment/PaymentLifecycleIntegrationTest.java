@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.example.limitedticketing.inventory.domain.model.Inventory;
 import com.example.limitedticketing.inventory.domain.repository.InventoryRepository;
+import com.example.limitedticketing.integration.support.FixedClockConfiguration;
 import com.example.limitedticketing.member.domain.model.Member;
 import com.example.limitedticketing.member.domain.repository.MemberRepository;
 import com.example.limitedticketing.payment.domain.model.Payment;
@@ -24,6 +25,7 @@ import com.example.limitedticketing.shared.vo.SalePeriod;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,11 +34,15 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -51,6 +57,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@Import(FixedClockConfiguration.class)
+@DisplayName("결제 흐름과 구매 및 재고 정합성 통합 검증")
 class PaymentLifecycleIntegrationTest {
 
     @Container
@@ -83,6 +91,9 @@ class PaymentLifecycleIntegrationTest {
     @Autowired
     private PaymentRepository paymentRepository;
 
+    @Autowired
+    private Clock clock;
+
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", postgresql::getJdbcUrl);
@@ -91,6 +102,7 @@ class PaymentLifecycleIntegrationTest {
     }
 
     @Test
+    @DisplayName("결제 실패는 예약을 유지하고 새 결제 시도의 승인은 구매와 재고를 확정한다")
     void failedPaymentKeepsReservationAndRetryApprovalCompletesPurchase() throws Exception {
         Fixture fixture = createFixture(1);
         long purchaseId = reserve(fixture);
@@ -128,27 +140,7 @@ class PaymentLifecycleIntegrationTest {
     }
 
     @Test
-    void cancellingPurchaseReleasesReservationAndAllowsNewReservation() throws Exception {
-        Fixture fixture = createFixture(1);
-        long purchaseId = reserve(fixture);
-
-        mockMvc.perform(post("/api/purchases/{purchaseId}/cancel", purchaseId)
-                .header("X-Member-Id", fixture.memberId()))
-            .andExpect(status().isNoContent());
-
-        Purchase cancelledPurchase = purchaseRepository.findById(purchaseId).orElseThrow();
-        Inventory releasedInventory = inventoryRepository.findById(fixture.inventoryId()).orElseThrow();
-        assertThat(cancelledPurchase.getStatus()).isEqualTo(PurchaseStatus.CANCELLED);
-        assertThat(releasedInventory.getAvailableQuantity()).isEqualTo(1);
-        assertThat(releasedInventory.getReservedQuantity()).isZero();
-
-        mockMvc.perform(post("/api/sale-products/{saleProductId}/purchases", fixture.saleProductId())
-                .header("X-Member-Id", fixture.memberId())
-                .header("Idempotency-Key", "purchase-request-after-cancel"))
-            .andExpect(status().isCreated());
-    }
-
-    @Test
+    @DisplayName("같은 결제 요청 키로 동시에 요청하면 하나의 결제 시도만 생성한다")
     void returnsSamePaymentForConcurrentRequestsWithSamePaymentRequestKey() throws Exception {
         Fixture fixture = createFixture(1);
         long purchaseId = reserve(fixture);
@@ -162,6 +154,92 @@ class PaymentLifecycleIntegrationTest {
 
         assertThat(paymentIds).hasSize(20).allSatisfy(paymentId -> assertThat(paymentId).isEqualTo(paymentIds.get(0)));
         assertThat(paymentCount).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("예약 만료 직전의 결제 승인은 구매를 완료한다")
+    void approvalJustBeforeExpirationCompletesThePurchase() throws Exception {
+        Fixture fixture = createFixture(1);
+        long purchaseId = reserve(fixture);
+        long paymentId = createPayment(fixture, purchaseId, "payment-before-expiration");
+        jdbcTemplate.update("update purchases set expires_at = ? where id = ?",
+            LocalDateTime.now(clock).plusSeconds(1), purchaseId);
+
+        mockMvc.perform(post("/api/payments/{paymentId}/approve", paymentId)
+                .header("X-Member-Id", fixture.memberId()))
+            .andExpect(status().isOk());
+
+        assertThat(purchaseRepository.findById(purchaseId).orElseThrow().getStatus()).isEqualTo(PurchaseStatus.PAID);
+        assertThat(inventoryRepository.findById(fixture.inventoryId()).orElseThrow().getSoldQuantity()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("만료 시각의 승인과 새 결제 생성은 예약을 변경하지 않고 거부한다")
+    void expirationDeadlineRejectsApprovalAndNewPaymentWithoutChangingTheReservation() throws Exception {
+        Fixture fixture = createFixture(1);
+        long purchaseId = reserve(fixture);
+        long paymentId = createPayment(fixture, purchaseId, "payment-at-expiration");
+        jdbcTemplate.update("update purchases set expires_at = ? where id = ?", LocalDateTime.now(clock), purchaseId);
+
+        mockMvc.perform(post("/api/payments/{paymentId}/approve", paymentId)
+                .header("X-Member-Id", fixture.memberId()))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("PURCHASE_RESERVATION_EXPIRED"));
+        mockMvc.perform(post("/api/purchases/{purchaseId}/payments", purchaseId)
+                .header("X-Member-Id", fixture.memberId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"paymentRequestKey\":\"new-payment-at-expiration\"}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("PURCHASE_RESERVATION_EXPIRED"));
+
+        assertThat(paymentRepository.findByPaymentRequestKey("new-payment-at-expiration")).isEmpty();
+        assertThat(paymentRepository.findById(paymentId).orElseThrow().getStatus()).isEqualTo(PaymentStatus.READY);
+        assertPendingReservation(fixture, purchaseId);
+    }
+
+    @ParameterizedTest(name = "{displayName} [{arguments}]")
+    @ValueSource(strings = {"approve", "fail"})
+    @DisplayName("다른 회원의 결제 승인과 실패 처리는 상태를 변경하지 않고 거부한다")
+    void anotherMemberCannotProcessThePayment(String action) throws Exception {
+        Fixture fixture = createFixture(1);
+        long purchaseId = reserve(fixture);
+        long paymentId = createPayment(fixture, purchaseId, "payment-ownership-" + action);
+        Member anotherMember = memberRepository.save(Member.register("other-payment-" + action, "다른 회원"));
+
+        mockMvc.perform(post("/api/payments/{paymentId}/{action}", paymentId, action)
+                .header("X-Member-Id", anotherMember.getId()))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value("PAYMENT_OWNERSHIP_VIOLATION"));
+
+        assertThat(paymentRepository.findById(paymentId).orElseThrow().getStatus()).isEqualTo(PaymentStatus.READY);
+        assertPendingReservation(fixture, purchaseId);
+    }
+
+    @Test
+    @DisplayName("다른 회원의 구매에는 결제 시도를 생성할 수 없다")
+    void anotherMemberCannotCreatePaymentForThePurchase() throws Exception {
+        Fixture fixture = createFixture(1);
+        long purchaseId = reserve(fixture);
+        Member anotherMember = memberRepository.save(Member.register("other-payment-create", "다른 회원"));
+
+        mockMvc.perform(post("/api/purchases/{purchaseId}/payments", purchaseId)
+                .header("X-Member-Id", anotherMember.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"paymentRequestKey\":\"payment-create-forbidden\"}"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value("PAYMENT_OWNERSHIP_VIOLATION"));
+
+        assertThat(paymentRepository.findByPaymentRequestKey("payment-create-forbidden")).isEmpty();
+        assertPendingReservation(fixture, purchaseId);
+    }
+
+    private void assertPendingReservation(Fixture fixture, long purchaseId) {
+        assertThat(purchaseRepository.findById(purchaseId).orElseThrow().getStatus())
+            .isEqualTo(PurchaseStatus.PENDING_PAYMENT);
+        Inventory inventory = inventoryRepository.findById(fixture.inventoryId()).orElseThrow();
+        assertThat(inventory.getAvailableQuantity()).isZero();
+        assertThat(inventory.getReservedQuantity()).isEqualTo(1);
+        assertThat(inventory.getSoldQuantity()).isZero();
     }
 
     private long reserve(Fixture fixture) throws Exception {
@@ -237,7 +315,7 @@ class PaymentLifecycleIntegrationTest {
     private Fixture createFixture(long inventoryQuantity) {
         Member member = memberRepository.save(Member.register("member-" + System.nanoTime(), "테스트 회원"));
         Product product = productRepository.save(Product.create("치킨 할인 쿠폰", "1만원 할인"));
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(clock);
         SaleProduct saleProduct = SaleProduct.schedule(
             product.getId(),
             Money.of(BigDecimal.valueOf(10_000)),

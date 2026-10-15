@@ -27,6 +27,16 @@ public class PurchaseRepositoryAdapter implements PurchaseRepository {
     }
 
     @Override
+    public void transitionFromPending(Purchase purchase) {
+        int updated = jpaPurchaseRepository.transitionIfPending(
+            purchase.getId(), purchase.getStatus().name(), purchase.activePurchaseKey()
+        );
+        if (updated == 0) {
+            throw PurchaseException.invalidState("Purchase is no longer pending payment");
+        }
+    }
+
+    @Override
     public IdempotentPurchase saveIfAbsent(Purchase purchase) {
         int inserted = jpaPurchaseRepository.insertIfAbsent(
             purchase.getMemberId(),

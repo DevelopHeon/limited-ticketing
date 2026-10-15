@@ -95,7 +95,7 @@ public class PurchaseCommandService {
         Purchase purchase = purchaseFinder.getRequired(command.purchaseId());
 
         purchase.markPaid();
-        purchaseRepository.save(purchase);
+        purchaseRepository.transitionFromPending(purchase);
     }
 
     @Transactional
@@ -103,10 +103,10 @@ public class PurchaseCommandService {
         Purchase purchase = purchaseFinder.getRequired(command.purchaseId());
 
         purchase.cancelBy(command.memberId());
+        purchaseRepository.transitionFromPending(purchase);
         inventoryCommandFacade.releaseReservation(
             new ReleaseInventoryReservationInput(purchase.getSaleProductId(), purchase.getQuantity())
         );
-        purchaseRepository.save(purchase);
     }
 
     private PurchaseReservationResult reservationResultOf(Purchase purchase, Long saleProductId) {

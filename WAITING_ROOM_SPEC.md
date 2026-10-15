@@ -21,7 +21,7 @@ DB의 `Purchase`, `Inventory`는 최종 정합성 기준으로 유지한다. Red
 
 ### 이번 단계
 
-- `queue` 애플리케이션 모듈 추가
+- `purchasewaiting` 애플리케이션 모듈 추가
 - `reservation_queue_entries` DB 테이블과 상태 전이
 - Redis ZSET 기반 대기 순서와 처리 중 요청 집합
 - Lua 스크립트로 상품별 제한 인원만 원자적으로 claim
@@ -176,7 +176,7 @@ Redis claim 뒤 워커가 중단될 수 있으므로 PROCESSING 상태가 설정
 7. 오래된 PROCESSING DB 행은 WAITING으로 돌아가 다시 처리 가능해진다.
 8. DB에 없는 Redis waiting/processing UUID는 복구 작업이 제거한다.
 9. CLOSED 판매에 활성 QueueEntry가 없으면 Redis 세 키가 삭제된다.
-10. Spring Modulith 검증으로 queue -> purchase/member/sale 공개 API 의존성만 허용한다.
+10. Spring Modulith 검증으로 purchasewaiting -> purchase/member/sale 공개 API 의존성만 허용한다.
 
 ## 11. 단계별 진행 계획
 

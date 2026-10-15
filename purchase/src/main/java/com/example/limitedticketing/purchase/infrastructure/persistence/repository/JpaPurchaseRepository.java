@@ -17,6 +17,20 @@ public interface JpaPurchaseRepository extends JpaRepository<PurchaseJpaEntity, 
 
     Optional<PurchaseJpaEntity> findByMemberIdAndPurchaseRequestKey(Long memberId, String purchaseRequestKey);
 
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = """
+        update purchases
+        set status = :status,
+            active_purchase_key = :activePurchaseKey
+        where id = :purchaseId
+          and status = 'PENDING_PAYMENT'
+        """, nativeQuery = true)
+    int transitionIfPending(
+        @Param("purchaseId") Long purchaseId,
+        @Param("status") String status,
+        @Param("activePurchaseKey") String activePurchaseKey
+    );
+
     @Modifying
     @Query(value = """
         insert into purchases (

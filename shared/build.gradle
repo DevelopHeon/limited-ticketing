@@ -1,3 +1,6 @@
 dependencies {
     compileOnly rootProject.libraries.modulithCore
+
+    testImplementation rootProject.libraries.bootTest
+    testRuntimeOnly rootProject.libraries.junitPlatform
 }

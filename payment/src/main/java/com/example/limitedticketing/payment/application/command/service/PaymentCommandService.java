@@ -78,7 +78,7 @@ public class PaymentCommandService {
         inventoryCommandFacade.confirmReservation(
             new ConfirmInventoryReservationInput(purchase.saleProductId(), purchase.quantity())
         );
-        paymentRepository.save(payment);
+        paymentRepository.transitionFromReady(payment);
 
         return PaymentAttemptResult.of(payment);
     }
@@ -90,7 +90,7 @@ public class PaymentCommandService {
         ensurePurchaseMember(command.memberId(), purchase);
 
         payment.fail();
-        paymentRepository.save(payment);
+        paymentRepository.transitionFromReady(payment);
 
         return PaymentAttemptResult.of(payment);
     }

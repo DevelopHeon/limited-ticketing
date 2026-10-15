@@ -24,6 +24,14 @@ public class PaymentRepositoryAdapter implements PaymentRepository {
     }
 
     @Override
+    public void transitionFromReady(Payment payment) {
+        int updated = jpaPaymentRepository.transitionIfReady(payment.getId(), payment.getStatus().name(), payment.getApprovedAt());
+        if (updated == 0) {
+            throw PaymentException.invalidState("Payment is no longer ready");
+        }
+    }
+
+    @Override
     public IdempotentPayment saveIfAbsent(Payment payment) {
         int inserted = jpaPaymentRepository.insertIfAbsent(
             payment.getPurchaseId(),

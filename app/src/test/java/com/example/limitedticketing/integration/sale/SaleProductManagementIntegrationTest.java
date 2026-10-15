@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -34,6 +35,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@DisplayName("판매 상품 관리와 공개 조회 통합 검증")
 class SaleProductManagementIntegrationTest {
 
     @Container
@@ -56,6 +58,7 @@ class SaleProductManagementIntegrationTest {
     }
 
     @Test
+    @DisplayName("관리자는 판매를 생성하고 개시 및 종료하며 누구나 공개 정보를 조회한다")
     void adminCanManageSaleProductAndPublicCanReadIt() throws Exception {
         LocalDateTime now = LocalDateTime.now();
         long saleProductId = createDraft(now.minusMinutes(1), now.plusHours(1));
@@ -105,6 +108,7 @@ class SaleProductManagementIntegrationTest {
     }
 
     @Test
+    @DisplayName("관리자 인증이 없는 판매 관리 요청을 거부한다")
     void adminEndpointsRequireDevelopmentAdminHeader() throws Exception {
         mockMvc.perform(post("/api/admin/sale-products")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -120,6 +124,7 @@ class SaleProductManagementIntegrationTest {
     }
 
     @Test
+    @DisplayName("허용된 페이지 크기를 초과한 판매 조회 요청을 거부한다")
     void pageSizePolicyIsValidatedByTheApplicationQuery() throws Exception {
         mockMvc.perform(get("/api/sale-products")
                 .param("size", "101"))

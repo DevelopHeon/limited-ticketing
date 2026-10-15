@@ -5,7 +5,7 @@
 Limited Ticketing은 한정 수량 상품의 판매, 재고 예약, 구매, 결제 시도와 대기열 진입을 다루는 **모듈러 모놀리스**다. 현재 모든 모듈은 하나의 Spring Boot 애플리케이션으로 실행하고 하나의 컨테이너 또는 Pod로 배포한다.
 
 ```text
-member + sale + inventory + purchase + payment + queue
+member + sale + inventory + purchase + payment + purchasewaiting
                             |
                          app.jar
                             |
@@ -33,21 +33,23 @@ limited-ticketing
 ├── inventory    # 가용/예약/판매 재고 전이
 ├── purchase     # 구매 예약, 취소, 만료, 구매 완료
 ├── payment      # 결제 시도 이력과 승인/실패
-└── queue        # Redis 대기열, 비동기 예약 처리와 상태 조회
+└── purchasewaiting # 구매 대기 접수, 순번, 처리 결과와 복구
 ```
 
 | 모듈 | 주요 모델 | 책임 | 공개 API를 사용하는 모듈 |
 |---|---|---|---|
 | `shared` | `Money`, `SalePeriod`, `DomainException`, `ApiResponse` | 전 모듈에서 동일한 의미를 갖는 계약 | 전체 |
-| `member` | `Member`, `MemberStatus` | 회원 식별, 구매 가능 여부 | `purchase`, `queue` |
-| `sale` | `Product`, `SaleProduct`, `SaleStatus` | 판매 상품, 기간, 판매 상태와 구매 가능 여부 | `purchase`, `queue` |
+| `member` | `Member`, `MemberStatus` | 회원 식별, 구매 가능 여부 | `purchase`, `purchasewaiting` |
+| `sale` | `Product`, `SaleProduct`, `SaleStatus` | 판매 상품, 기간, 판매 상태와 구매 가능 여부 | `purchase`, `purchasewaiting` |
 | `inventory` | `Inventory` | 가용, 예약, 판매 수량의 원자적 전이 | `sale`, `purchase`, `payment` |
-| `purchase` | `Purchase`, `PurchaseStatus` | 구매 예약, 취소, 만료, 완료와 구매 멱등성 | `payment`, `queue` |
+| `purchase` | `Purchase`, `PurchaseStatus` | 구매 예약, 취소, 만료, 완료와 구매 멱등성 | `payment`, `purchasewaiting` |
 | `payment` | `Payment`, `PaymentStatus` | 결제 시도 이력과 승인/실패 처리 | HTTP API |
-| `queue` | `ReservationQueueEntry`, `ReservationQueueStatus` | 대기 순번, 처리 상태, 비동기 예약 결과 | HTTP API |
+| `purchasewaiting` | `ReservationQueueEntry`, `ReservationQueueStatus` | 구매 대기 접수, 순번, 처리 결과와 복구 | HTTP API |
 | `app` | - | 실행 모듈, DataSource/Flyway/Redis/Security/전역 예외 조립 | 전체 |
 
 모듈 간 Aggregate 참조는 객체 그래프가 아니라 식별자로 표현한다. 예를 들어 `Purchase`는 `memberId`, `saleProductId`만 보관하며 `Member`, `SaleProduct` 엔티티를 직접 참조하지 않는다.
+
+`purchasewaiting`은 기술적 범용 큐가 아니라 구매 대기 요청의 수명 주기를 소유한다. 구매 대기 접수·조회·처리·복구와 실제 구매 예약의 책임을 분리하고, 예약 자체는 `purchase`의 공개 Facade에 위임한다. Java 패키지와 Gradle 모듈명은 이 업무를 표현하며 기존 HTTP 경로, DB 테이블, Redis 키와 `limited-ticketing.queue` 설정은 유지한다.
 
 ## 3. 모듈 경계와 의존 규칙
 
@@ -62,7 +64,7 @@ purchase  -> shared::vo, shared::exception, shared::api,
              member::api, sale::api, inventory::api
 payment   -> shared::vo, shared::exception, shared::api,
              purchase::api, inventory::api
-queue     -> shared::api, shared::exception,
+purchasewaiting -> shared::api, shared::exception,
              member::api, sale::api, purchase::api
 ```
 
@@ -213,6 +215,10 @@ reservation_queue_entries(member_id, purchase_request_key)
 활성 구매와 활성 대기열 항목은 별도 제약으로 막는다. 구매는 `active_purchase_key`를 사용하고, 대기열은 `WAITING`, `PROCESSING` 상태에만 적용되는 `(member_id, sale_product_id)` 부분 유니크 인덱스를 사용한다.
 
 재고 예약은 조회 후 저장 방식이 아니라 조건부 원자 UPDATE로 수행한다. `available_quantity >= 요청 수량`일 때만 `available`을 줄이고 `reserved`를 늘린다. 영향 행 수가 0이면 재고 부족으로 처리하므로 동시 요청에서도 음수 재고와 유실 갱신을 방지한다.
+
+구매의 결제 완료·취소·만료는 `PENDING_PAYMENT`인 행만 조건부 UPDATE로 전이한다. 상태 전이에 성공한 요청만 같은 트랜잭션에서 재고를 확정하거나 반환한다. 동일 구매를 동시에 승인·취소해도 다른 회원의 예약 수량을 중복 차감하지 않는다.
+
+결제 시도의 승인·실패도 `READY`인 행만 조건부 UPDATE로 전이한다. 실패와 승인이 동시에 도착해도 완료된 결제 상태를 덮어쓰지 않으며, 승인 요청이 결제 상태 전이에 실패하면 같은 트랜잭션의 구매 완료와 재고 확정도 롤백한다.
 
 ### 도메인 이벤트
 
@@ -397,14 +403,18 @@ Application: localhost:8081
 ### 자동 검증
 
 ```bash
-./gradlew test
+./gradlew check
 ```
 
 | 검증 | 목적 |
 |---|---|
-| `ModularityTests` | Named Interface 외부 접근, 금지된 모듈 참조, 순환 의존 검증 |
-| `LayeringArchitectureTests` | Domain의 Spring/JPA 의존, Application의 Infrastructure 직접 의존, 공개 DTO의 Domain/내부 DTO 노출 검증 |
+| Checkstyle | 모든 모듈의 main/test에서 `var`와 `setXxx` 메서드 선언 금지 |
+| `ModularityTests` | 전체 업무 모듈 감지, Named Interface를 통한 공개 계약 사용, 금지된 모듈 참조와 순환 의존 검증 |
+| `LayeringArchitectureTests` | 각 업무 모듈 내부의 Domain → 외부 계층, Application → 어댑터 역방향 의존 금지, Presentation의 Facade 우회와 공개 DTO의 내부 타입 노출 검증 |
+| Domain 단위 테스트 | 회원 구매 자격, 판매 시간 경계, 재고 수량 보존, 구매·결제·대기 요청의 허용 상태 전이 검증 |
+| Application Service 단위 테스트 | 각 업무 모듈에서 실제 Domain 객체와 고정 Clock을 사용해 구매 멱등성, 결제 소유권·만료, 대기 결과 분류와 시스템 오류 전파 검증 |
 | `PurchaseConcurrencyIntegrationTest` | 동시 예약에서 정확한 재고 수량과 활성 구매 제약 검증 |
+| `PurchaseLifecycleConcurrencyIntegrationTest` | 동일 구매의 동시 승인·취소 시 상태 전이 단일 성공과 다른 회원의 예약 재고 보호 |
 | `PurchaseReservationIntegrationTest` | 구매 예약과 구매 멱등성 검증 |
 | `PaymentLifecycleIntegrationTest` | 결제 실패/재시도/승인/취소에 따른 구매와 재고 전이 검증 |
 | `SaleProductManagementIntegrationTest` | 판매 생성, 상태 전이, 재고 생성, 목록/상세 조회 검증 |
@@ -420,4 +430,8 @@ app/build/spring-modulith-docs/
 └── all-docs.adoc
 ```
 
-새 모듈, Named Interface, 모듈 간 의존성을 변경할 때는 `./gradlew test`를 실행해 아키텍처 검증과 모듈 문서 생성을 함께 갱신한다. Redis 대기열의 세부 선택 근거와 단계별 부하 검증 계획은 [WAITING_ROOM_SPEC.md](WAITING_ROOM_SPEC.md)에 기록한다.
+Checkstyle 규칙은 `config/checkstyle/checkstyle.xml`이 소유한다. `setXxx` 금지는 프로젝트가 선언한 메서드 이름에 적용하며 외부 라이브러리 메서드 호출은 검사하지 않는다. 의미 있는 업무 동사인지 여부는 코드 리뷰에서 확인한다.
+
+Domain 및 Application Service 단위 테스트는 각 업무 모듈이 소유한다. Service 단위 테스트는 Spring Context 없이 Repository·다른 모듈의 Facade·출력 Port를 대체하고 업무 분기와 허용·금지되는 부수효과를 검증한다. HTTP, 보안, 모듈 연결, 실제 DB·Redis와 트랜잭션·동시성은 실행 모듈 `app`의 통합 테스트에서 검증한다. 단위 테스트의 Mock으로 DB 정합성과 롤백을 검증했다고 간주하지 않는다. 모든 테스트 클래스와 테스트 메서드는 한국어 `@DisplayName`으로 검증하는 정책을 설명한다.
+
+새 모듈, Named Interface, 모듈 간 의존성을 변경할 때는 `./gradlew check`를 실행해 코드 규칙, 아키텍처, 업무 동작과 모듈 문서 생성을 함께 검증한다. `./gradlew test`는 Checkstyle을 실행하지 않는다. Redis 대기열의 세부 선택 근거와 단계별 부하 검증 계획은 [WAITING_ROOM_SPEC.md](WAITING_ROOM_SPEC.md)에 기록한다.

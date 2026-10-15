@@ -9,6 +9,8 @@ public interface PurchaseRepository {
 
     Purchase save(Purchase purchase);
 
+    void transitionFromPending(Purchase purchase);
+
     IdempotentPurchase saveIfAbsent(Purchase purchase);
 
     Optional<Purchase> findById(Long purchaseId);

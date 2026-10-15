@@ -7,6 +7,8 @@ public interface PaymentRepository {
 
     Payment save(Payment payment);
 
+    void transitionFromReady(Payment payment);
+
     IdempotentPayment saveIfAbsent(Payment payment);
 
     Optional<Payment> findById(Long paymentId);

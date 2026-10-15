@@ -38,6 +38,16 @@ def evaluate(data=None, db=None, observations=True):
 
 
 class BaselineResultTest(unittest.TestCase):
+    def test_mismatched_api_database_is_rejected_before_cleanup(self):
+        """API와 DB가 다른 환경을 가리키면 같은 숫자 ID라도 외부 구매를 취소하지 않는다."""
+        with patch.dict('os.environ', {'DATABASE_URL': 'postgresql://test:test@localhost/test'}):
+            environment = Environment('http://localhost', 'http://localhost', 'test')
+        fixture = {'runId': 'owned', 'saleProductId': 1, 'members': [{'memberId': 7}]}
+        snapshot = {'queue': {}, 'pendingPurchases': [{'purchaseId': 2, 'memberId': 7}]}
+        with patch.object(environment, 'http', return_value=(200, {'data': {'saleProductId': 1, 'productName': 'foreign'}})):
+            with self.assertRaisesRegex(RuntimeError, 'API and database fixture'):
+                environment.cleanup(fixture, snapshot)
+
     def test_only_one_run_can_use_a_database(self):
         """같은 전용 DB를 동시에 측정해 서로의 부하가 섞이는 실행을 거부한다."""
         with tempfile.TemporaryDirectory() as folder, patch('tempfile.gettempdir', return_value=folder):
@@ -79,9 +89,9 @@ class BaselineResultTest(unittest.TestCase):
         """구매 취소의 정상 204 응답을 실패로 오인하지 않고 실험을 정리한다."""
         with patch.dict('os.environ', {'DATABASE_URL': 'postgresql://test:test@localhost/test'}):
             environment = Environment('http://localhost', 'http://localhost', 'test')
-        fixture = {'saleProductId': 1, 'members': [{'memberId': 7}]}
+        fixture = {'runId': 'owned', 'saleProductId': 1, 'members': [{'memberId': 7}]}
         snapshot = {'queue': {}, 'pendingPurchases': [{'purchaseId': 2, 'memberId': 7}]}
-        with patch.object(environment, 'http', side_effect=[(204, None), (200, {})]):
+        with patch.object(environment, 'http', side_effect=[(200, {'data': {'saleProductId': 1, 'productName': 'baseline-owned', 'status': 'OPEN'}}), (204, None), (200, {})]):
             self.assertEqual(environment.cleanup(fixture, snapshot)['status'], 'PASS')
 
     def test_cleanup_rejects_foreign_member(self):

@@ -45,6 +45,9 @@ services:
 
   grafana:
     image: grafana/grafana:13.2.4
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - 'test -n "$$GF_SECURITY_ADMIN_PASSWORD" || { echo "GRAFANA_ADMIN_PASSWORD is required"; exit 1; }; exec /run.sh'
     profiles: [observability]
     ports:
       - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"

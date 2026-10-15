@@ -36,6 +36,8 @@ def prepare(environment, run, name, count, inventory):
     fixture = environment.prepare_fixture(run.manifest['runId'] + '-' + name, count, inventory)
     write_json(run.path / f'{name}.json', fixture)
     try:
+        if environment.ensure_fixture_target(fixture).get('status') != 'OPEN':
+            raise RuntimeError('Prepared fixture is not OPEN at the target API')
         environment.issue_keys(fixture)
     finally:
         write_json(run.path / f'{name}.json', fixture)

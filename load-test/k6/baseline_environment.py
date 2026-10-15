@@ -129,6 +129,14 @@ class Environment:
             member['purchaseRequestKey'] = data['data']['idempotencyKey']
         return fixture
 
+    def ensure_fixture_target(self, fixture):
+        status, body = self.http(f"/api/sale-products/{fixture['saleProductId']}")
+        data = body.get('data', {}) if isinstance(body, dict) else {}
+        if (status != 200 or data.get('saleProductId') != fixture['saleProductId']
+                or data.get('productName') != 'baseline-' + fixture['runId']):
+            raise RuntimeError('API and database fixture do not identify the same experiment')
+        return data
+
     def ensure_idle(self):
         counts = self.sql(query="""SELECT
             (SELECT COUNT(*) FROM reservation_queue_entries WHERE status IN ('WAITING','PROCESSING')) +
@@ -140,15 +148,17 @@ class Environment:
         if sum(snapshot.get('queue', {}).get(key, 0) for key in ('WAITING', 'PROCESSING')):
             return {'status': 'SKIPPED', 'reason': 'Active requests retained for investigation'}
         allowed = {item['memberId'] for item in fixture['members']}
+        if any(purchase['memberId'] not in allowed for purchase in snapshot.get('pendingPurchases', [])):
+            raise RuntimeError('Cleanup rejected a purchase outside the fixture')
+        target = self.ensure_fixture_target(fixture)
         for purchase in snapshot.get('pendingPurchases', []):
-            if purchase['memberId'] not in allowed:
-                raise RuntimeError('Cleanup rejected a purchase outside the fixture')
             status, _ = self.http(f"/api/purchases/{purchase['purchaseId']}/cancel", member=purchase['memberId'], method='POST')
             if status != 204:
                 raise RuntimeError('Fixture purchase cleanup failed')
-        status, _ = self.http(f"/api/admin/sale-products/{fixture['saleProductId']}/close", admin=True, method='POST')
-        if status != 200:
-            raise RuntimeError('Fixture sale cleanup failed')
+        if target.get('status') != 'CLOSED':
+            status, _ = self.http(f"/api/admin/sale-products/{fixture['saleProductId']}/close", admin=True, method='POST')
+            if status != 200:
+                raise RuntimeError('Fixture sale cleanup failed')
         return {'status': 'PASS', 'finishedAt': utc_now()}
 
     def preflight(self):
@@ -189,6 +199,7 @@ class Environment:
                 'docker': json.loads(self.command(['docker', 'info', '--format', '{"cpus":{{.NCPU}},"memoryBytes":{{.MemTotal}}}'])),
                 'containers': resources,
                 'worker': {key: os.environ.get(key, value) for key, value in WORKER_DEFAULTS.items()},
+                'workerConfigSource': 'operator launch environment and repository defaults; not read from a remote config endpoint',
                 'declaredJvmOptions': os.environ.get('BASELINE_JVM_OPTIONS', 'UNRECORDED'),
                 'appProfile': 'local', 'composeProject': self.compose[-1],
                 'baseUrl': self.base_url, 'prometheusUrl': self.prometheus_url}

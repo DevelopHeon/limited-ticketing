@@ -57,6 +57,10 @@ SPRING_PROFILES_ACTIVE=local ./gradlew :app:bootRun
 
 설정 값, 로컬 인증 헤더와 API 목록은 [개발 및 검증 가이드](docs/development/README.md)를 참고합니다.
 
+## 학습 구현 진행
+
+**한정 상품 플래시세일**을 기준으로 Redis ZSET·Kafka·조회 캐시·인기/판매 랭킹·장애 복구·5,000명 부하 평가를 학습합니다. [전체 구현 계획](docs/plans/2026-10-15-flash-sale-implementation-plan.md)과 [1단계 스펙](docs/specs/2026-10-15-stage-1-observability-baseline.md)을 검토한 뒤 단계별로 진행합니다. 각 단계는 검증·한국어 commit/push 후 검토 대기하며, 다음 단계는 별도 시작 요청과 필요한 논의 후 진행합니다. 현재 1단계 기능 구현은 미착수입니다.
+
 ## 문서
 
 [문서 목차](docs/README.md)에서 목적에 맞는 문서를 선택할 수 있습니다.
@@ -69,5 +73,7 @@ SPRING_PROFILES_ACTIVE=local ./gradlew :app:bootRun
 | [ADR](docs/adr/README.md) | 주요 선택의 배경, 대안과 비용 |
 | [부하 테스트](docs/performance/load-testing.md) | 직접 예약·대기 접수 실행과 최종 상태 검증 |
 | [평가 기록](docs/evaluations/load-testing/2026-10-15-existing-results.md) | 기존 측정 수치, 원본 식별자와 해석 한계 |
-| [로드맵](docs/plans/roadmap.md) | 남은 검증과 확장 판단 기준 |
+| [구현 계획](docs/plans/2026-10-15-flash-sale-implementation-plan.md) | 플래시세일 학습 범위·단계별 작업·검토 규칙 |
+| [1단계 스펙](docs/specs/2026-10-15-stage-1-observability-baseline.md) | 관측·재현 가능한 기준선의 구현·인수 계약 |
+| [로드맵](docs/plans/roadmap.md) | 현재 진행 상태와 다음 단계 검토 |
 | [완료 스펙](docs/archive/specs/2026-10-15-purchase-waiting-implementation.md) | 당시 구현 계획 원문과 현재 문서 연결 |

@@ -9,8 +9,13 @@
 | `adr/` | [결정 목록](adr/README.md) | 결정별 배경·대안·채택 내용·비용·근거 |
 | `performance/` | [부하 테스트 실행](performance/load-testing.md) | 실제 스크립트·SQL의 준비와 실행, 관찰·최종 DB 검증 절차 |
 | `evaluations/` | [기존 구매 대기 평가](evaluations/load-testing/2026-10-15-existing-results.md) | 실행별 원본 식별자·조건·측정 수치·미확인 범위 |
-| `plans/` | [로드맵](plans/roadmap.md) | 미완료 인수 기준과 확장 도입 조건 |
+| `plans/` | [구현 계획](plans/2026-10-15-flash-sale-implementation-plan.md) | 전체 학습 범위·단계·검토 규칙, [현재 상태](plans/roadmap.md) |
+| `specs/` | [1단계 스펙](specs/2026-10-15-stage-1-observability-baseline.md) | 다음 구현의 계약·실험 조건·인수 기준 |
 | `archive/` | [구매 대기 구현 스펙 보관본](archive/specs/2026-10-15-purchase-waiting-implementation.md) | 원문과 당시 상태 보존, 현재 기준 문서로 연결 |
+
+## 단계 작업의 진입점
+
+[구현 계획](plans/2026-10-15-flash-sale-implementation-plan.md)의 단계 실행 규칙과 해당 단계 스펙을 먼저 읽는다. 단계별 검증·한국어 commit/push·인계 후 검토 대기하며 다음 단계를 자동 실행하지 않는다. 다음 단계 시작 요청 때 미결정 계약은 논의 후 확정한다.
 
 ## 작업별 읽는 순서
 

@@ -1,62 +1,44 @@
-# 현재 단계와 로드맵
+# 현재 진행 상태와 다음 검토
 
-현재 구현과 미완료 검증을 구분한다. 대기열의 현재 계약은 [구매 대기 설계](../architecture/purchase-waiting.md), 측정 방법은 [부하 테스트](../performance/load-testing.md), 원본으로 확인한 기존 기록과 한계는 [평가 보고서](../evaluations/load-testing/2026-10-15-existing-results.md)에서 확인한다.
+제품 방향은 **한정 상품 플래시세일**로 확정했다. Redis ZSET·Kafka·캐시·인기/판매 랭킹·내결함성·부하 평가를 필수 학습 범위로 진행한다. 단계별 범위·요구사항·종료 절차는 [구현 계획](2026-10-15-flash-sale-implementation-plan.md)이 소유한다.
 
-## 진행 현황
+## 현재 상태
 
-- [x] 도메인 모델과 모듈 경계 정의
-- [x] PostgreSQL/Flyway 기반 영속성 구성
-- [x] 구매 및 결제 멱등성 구현
-- [x] 조건부 원자 갱신 기반 재고 동시성 제어
-- [x] 직접 예약 k6 기준선 측정
-- [x] Redis ZSET 대기열과 단일 프로세스 Worker 구현
-- [x] Redis 대기열 1,000건 진입 시나리오 실행 및 수락/드롭 지표 확인
-- [ ] 5,000/10,000건 Stress·Spike 재측정과 직접 예약 대비 결과 정리
-- [ ] 상품별 대기 인원 제한, Rate Limit, Micrometer 운영 지표 추가
-- [ ] SSE 또는 WebSocket 기반 대기 상태 알림 검토
-- [ ] 필요 시 Transactional Outbox와 Kafka 기반 독립 Worker로 확장
-- [ ] 서비스와 DB가 실제로 분리될 때 Saga 검토
+- 문서 준비: 전체 구현 계획과 [1단계 스펙](../specs/2026-10-15-stage-1-observability-baseline.md) 작성 완료·검토 대기.
+- 기능 구현 1단계: **미착수**. 문서 작성·commit/push를 기능 구현 완료로 계산하지 않는다.
+- 다음 행동: 사용자가 1단계 시작을 요청하면 실행 환경·자원·도구 버전을 논의하고 스펙을 확정한 뒤 그 단계만 진행한다.
+- 각 단계는 검증·한국어 commit/push·결과 인계 후 검토 대기한다. 다음 단계는 자동 시작하지 않는다.
+
+## 재사용하는 기존 구현
+
+- [x] 업무 모듈과 공개 API 경계, PostgreSQL/Flyway 영속성
+- [x] 구매·결제 생성 멱등성, 조건부 상태 전이와 재고 원자 갱신
+- [x] Redis ZSET 대기 접수·처리·조회·단일 프로세스 Worker·DB 기반 복구
+- [x] Domain·Application Service·통합·동시성 테스트, ArchUnit·Modulith·Checkstyle
+- [x] 기존 직접 예약과 Redis 대기 진입 부하 실행 기록
+
+마지막 항목은 기존 실행이 있었다는 의미다. [기존 평가](../evaluations/load-testing/2026-10-15-existing-results.md)의 1,000건 수락·약 580ms 결과는 새로운 5,000명 목표·동일 조건 비교·최종 업무 결과 검증을 완료한 근거가 아니다.
 
 ## 단계별 진행 계획
 
-| 단계 | 상태 | 수행 내용 | 선택 이유와 완료 기준 |
-|---|---|---|---|
-| 0. DB 직접 예약 기준선 | 완료 | 조건부 원자 재고 갱신과 k6 동시 요청 측정 | Redis 도입 전에도 재고 정합성은 DB가 보장함을 확인했다. 성공·재고 소진 건수와 PostgreSQL 락 대기 값을 기준선으로 남긴다. |
-| 1. 대기열 최소 수직 슬라이스 | 완료 | DB Queue Entry, Redis ZSET, Lua claim, 단일 프로세스 워커, 상태 조회와 복구 | DB는 최종 상태, Redis는 순서와 슬롯이라는 경계를 확정했다. Testcontainers에서 멱등성, 중복 차단, `RESERVED`/`SOLD_OUT`, 복구를 통과하면 완료다. |
-| 2. 대기열 부하 측정 | 진행 중 | k6로 1,000/5,000/10,000명의 대기열 진입을 실행하고, 상태 조회는 별도 시나리오로 측정 | 직접 예약과 비교해 진입 API p95, 대기열 적재량, 워커 처리량, 최종 `RESERVED`/`SOLD_OUT` 수, PostgreSQL 락 대기를 기록한다. 대기열이 DB 진입을 설정한 슬롯 수로 제한하는지 확인한다. |
-| 3. 입구 보호와 운영 지표 | 대기 | 상품별 최대 대기 인원, 회원·IP rate limit, Micrometer 지표와 대시보드 추가 | Redis와 애플리케이션 자체가 무제한 요청의 병목이 되지 않게 한다. 거부율, 대기 시간, 처리 중 수, 복구 횟수, Redis 오류를 관측할 수 있어야 한다. |
-| 4. 사용자 대기 경험 | 대기 | SSE 또는 WebSocket 알림, 예상 순번/대기 시간, 재고 소진 시 남은 항목 일괄 `SOLD_OUT` 처리 | polling 비용을 줄이고 사용자에게 최종 상태를 빠르게 전달한다. 실제 클라이언트 요구가 생길 때 구현한다. |
-| 5. 다중 인스턴스·서비스 분리 | 보류 | 리더 선출 또는 분산 스케줄링, Outbox, Redis Stream/Kafka 워커 분리 | 단일 프로세스의 처리량·가용성 한계가 측정되거나 독립 배포가 필요할 때만 진행한다. 이 단계 전까지는 DB와 Redis의 이중 상태 복구를 단순하게 유지한다. |
+| 단계 | 상태 | 구현·평가 산출물 |
+|---|---|---|
+| 1. 관측·재현 기준선 | 스펙 검토 대기·미착수 | 자동 관측, 동일 유입 모델, manifest·최종 DB 검증·기준선 |
+| 2. ZSET 대기 정합성·입구 보호 | 미착수 | 순번/복구·조건부 claim·수용량·요청 제한·직접 경로 제한 |
+| 3. Kafka·Outbox 예약 전달 | 미착수 | 전달·재소비·API/Worker 역할 분리·partition/offset 실험 |
+| 4. 상품 조회 캐시 | 미착수 | 상세/목록 캐시·무효화·동시 miss 제어·cold/warm 비교 |
+| 5. 인기·판매 랭킹 | 미착수 | 일간/7일 집계·ZSET·상품 캐시 결합·복원 |
+| 6. 다중 프로세스·장애 복구 | 미착수 | Consumer/Broker/Redis/DB 장애와 복구 검증 |
+| 7. 종합 부하·학습 정리 | 미착수 | 5,000명 집중·분산·조회·폭주·지속 평가 |
 
 ## 다음 검증
 
-대기열 진입 k6 시나리오는 구현되어 있고 1,000건 실행 기록이 있다. 다음 작업은 5,000/10,000건 Stress·Spike를 재측정하고, 같은 상품·재고·유입 조건에서 직접 예약과 비교하는 것이다. 상태 조회 부하는 진입 시나리오와 분리해 추가 측정한다. 1,000건 수락 기록을 성능 목표 달성이나 더 큰 규모의 검증 완료로 간주하지 않는다.
+1단계는 [스펙의 인수 기준](../specs/2026-10-15-stage-1-observability-baseline.md#7-테스트인수-기준)에 따라 수행한다. 종료 시 검증 결과·원본·실행 revision·한계·미달 항목을 연결한다. 2단계는 직전 평가를 검토한 뒤 순번 원장, lease/fencing, 복구 cursor, 과부하 정책을 논의하고 시작한다.
 
 ## 메시징 확장 판단 기준
 
-현재는 하나의 애플리케이션 안에서 Spring TaskExecutor가 비동기 작업을 처리한다. Kafka나 Redis Streams는 아직 구현하지 않았다.
+기존에는 Kafka를 처리량·독립 배포 요구가 생겼을 때 검토하는 후보로 두었다. 현재는 **Kafka 구성·partition·offset·재소비·내결함성 학습 자체가 요구사항**이므로 3단계 필수 범위로 변경했다. 현재 실행 코드에는 Kafka·Outbox가 아직 없다.
 
-같은 프로세스의 비핵심 후처리가 필요하면 Spring Event Listener로 시작한다. 프로세스 종료에도 이벤트 전달이 보장되어야 하면 Outbox를 검토하고, 작업 전달을 독립적으로 확장해야 할 때 Kafka를 함께 검토한다.
+ZSET의 입장 선택과 Kafka 작업 전달은 역할을 구분한다. 입장 DB 상태와 Outbox를 같은 트랜잭션으로 저장하고, Consumer의 DB 처리와 offset 저장 경계는 멱등성과 복구로 보호하는 방향이다. 정확한 상태·event·retry 계약은 3단계 스펙을 확정한 후 구현한다.
 
-다음 요구가 실제로 생길 때 Kafka를 검토한다.
-
-- 구매 처리 워커를 API 애플리케이션과 독립 배포해야 한다.
-- 여러 워커 인스턴스에서 작업을 분산해야 한다.
-- 작업 전달의 재시도, 소비 지연, 소비자별 처리량을 브로커 차원에서 관찰해야 한다.
-- 구매 완료 이벤트를 여러 독립 서비스에 전달해야 한다.
-
-Kafka를 도입하면 ZSET과 `QueueEntry`를 함께 유지한다. ZSET은 사용자 대기 순번, `QueueEntry`는 상태 조회와 멱등성, Kafka는 입장 허용된 작업의 전달을 담당한다.
-
-```text
-ZSET 대기열 입장 허용
-  -> QueueEntry: WAITING -> PROCESSING
-  -> 같은 DB 트랜잭션에서 Outbox 이벤트 저장
-  -> Outbox Publisher가 Kafka Producer로 발행
-  -> Kafka Consumer가 구매 예약 처리
-  -> QueueEntry: RESERVED / SOLD_OUT
-  -> 처리 성공 뒤 offset commit
-```
-
-이 단계에서는 현재 `reservationQueueTaskExecutor`와 Worker의 구매 처리 부분이 Kafka Consumer로 대체된다. ZSET에서 순번을 꺼내 Outbox를 만드는 admission dispatcher와 DB/Redis 복구 작업은 남는다. DB 상태 변경과 Kafka 발행을 직접 연달아 호출하면 중간 장애에서 작업이 유실될 수 있으므로 Outbox 없이 Kafka를 붙이지 않는다.
-
-서비스와 DB가 실제로 분리되어 보상 트랜잭션이 필요해질 때만 Saga를 검토한다. 현재 단일 DB 트랜잭션으로 해결하는 흐름에는 도입하지 않는다.
+SSE/WebSocket 알림, 실제 PG·운영 인증, PostgreSQL 자동 failover는 별도 후속 후보로 유지한다. 현재 단일 DB 구조에 Saga·서비스별 DB 분리를 선행 도입하지 않는다.

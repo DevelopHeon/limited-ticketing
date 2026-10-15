@@ -2,6 +2,12 @@
 
 모든 명령은 프로젝트 루트에서 실행한다. 시스템 설계는 [아키텍처](../architecture/module-boundaries.md), 성능 측정은 [부하 테스트](../performance/load-testing.md)를 참고한다.
 
+## 작업 위치와 결과
+
+기존 `limited-ticketing` checkout의 `master`에서 직접 작업한다. worktree는 여러 branch의 병렬 작업 등 작업 영역 분리가 필요한 복잡한 경우에만 사용한다. 앱·DB·Redis는 기존 로컬 환경을 사용한다. 단계별 검증·한국어 commit/push 후 다음 단계 시작 요청을 기다린다. 저장소의 [작업 규칙](../../AGENTS.md)을 따른다.
+
+측정 원본은 기존 프로젝트의 `load-test/k6/results/`, 평가 보고서는 `docs/evaluations/load-testing/`에서 검토한다. 측정 도구·SQL·테스트는 Git으로 관리하고 실행 결과와 비밀 설정은 제외한다. 실행·보존 절차는 [부하 테스트](../performance/load-testing.md)가 소유한다.
+
 ## 로컬 실행
 
 ### 요구 사항

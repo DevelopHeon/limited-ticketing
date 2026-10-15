@@ -67,13 +67,13 @@ HTTP 지연 단위는 ms, 완료 지연 단위는 초다. direct는 HTTP가 예�
 - DB별 로컬 배타 lock으로 같은 대상의 동시 측정을 막는다. lock과 외부 호출 실패는 불완전 결과로 기록한다. Worker 설정은 선언 출처를 표시한다.
 - 측정 도구는 결과/환경 I/O/실행 조율, 실제 k6 응답 분류를 책임별 파일로 나눴다. 실제 servlet 계측 테스트는 TestRestTemplate을 사용했다. psql에 큰 fixture는 stdin으로 전달해 macOS 인자 길이 제한을 피했다.
 
-보류한 경미 항목: 키 선발급 중 준비가 실패하면 fixture JSON은 보존하지만 OPEN 판매와 부분 발급 키를 자동 정리하지 않는다. 이 단계의 전용 로컬 DB에서만 도구를 사용하며, 반복 실패로 데이터가 쌓이면 저장한 fixture의 소유권을 확인해 정리하는 경로를 추가한다.
+보류한 경미 항목: 키 선발급 중 준비가 실패하면 fixture JSON은 보존하지만 OPEN 판매와 부분 발급 키를 자동 정리하지 않는다. 당시 측정은 전용 로컬 DB에서 수행했다. 현재는 실행 가이드에 따라 기존 로컬 환경을 사용하며, 반복 실패로 데이터가 쌓이면 저장한 fixture의 소유권을 확인해 정리하는 경로를 추가한다.
 
 초기 실패 Smoke의 원본도 삭제하지 않았다. 본 측정과 섞지 않으며 실패 원인별 manifest가 로컬 results에 남아 있다. 판정 보완 뒤 waiting Smoke에서도 workload·integrity·observability·latency 모두 PASS를 확인했다.
 
 ## 원본과 재분석 출처
 
-원본 위치는 이 작업의 로컬 managed worktree 아래 `load-test/k6/results/<runId>/`다. Git에는 보고서만 저장한다. 다른 checkout에 원본 JSON·CSV가 제공된다고 주장하지 않는다. manifest에는 입력·설정·소스 revision·각 artifact SHA-256이 있으며 자체 hash는 아래 표로 고정한다.
+원본은 당시 managed worktree에서 수집했고, 2026-10-15 사용자 요청에 따라 기존 `/Users/gimhuiheon/Documents/study/limited-ticketing/load-test/k6/results/`로 216개 파일을 복사했다. 복사 전후 SHA-256이 같고 기존 파일은 덮어쓰지 않았다. manifest의 당시 실행 경로와 측정 조건은 수정하지 않았다. Git에는 도구와 보고서를 저장하고 측정 원본은 제외한다. 원본은 이 로컬 checkout에 있으며 원격 clone에 제공된다고 주장하지 않는다. manifest에는 입력·설정·소스 revision·각 artifact SHA-256이 있으며 자체 hash는 아래 표로 고정한다.
 
 | runId | manifest SHA-256 |
 |---|---|

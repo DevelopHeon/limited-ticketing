@@ -12,34 +12,34 @@ cd "$(git rev-parse --show-toplevel)"
 
 `run-baseline.py`는 새 fixture·키 선발급·warmup·k6 실행·최종 SQL 검증·원본 보존·실험 소유 데이터 정리를 묶는다. 직접/대기 예약을 같은 유입 모델로 비교한다. [1단계 실측](../evaluations/load-testing/2026-10-15-stage-1-baseline.md)은 이 도구로 수집했다. 아래의 기존 개별 k6 시나리오와 서로 다른 유입 조건을 섞어 비교하지 않는다.
 
-### 전용 로컬 환경 준비
+### 기존 로컬 환경 준비
 
-현재 실행 중인 기본 앱/DB와 분리할 때는 별도 Compose project와 포트를 사용한다. `.env`가 없으면 `.env.example`을 복사하고 `GRAFANA_ADMIN_PASSWORD`를 설정한다. `.env`는 Git 제외 파일이다. 아래 DB 연결은 기본 개발 계정을 사용한 예이며 계정을 바꾸면 앱과 도구에 같은 연결 값을 지정한다.
+기존 `limited-ticketing` checkout의 `master`에서 작업하고 기존 앱·PostgreSQL·Redis를 사용한다. 이 부하 도구 실행을 위해 별도 worktree·Compose project·앱 프로세스·DB·Redis를 만들지 않는다. 기본 연결은 앱 8081·PostgreSQL 5432·Redis 6379이며, 이미 실행 중인 서비스는 그대로 사용한다. 아래 기동 명령은 앱이 실행 중이지 않을 때 사용한다.
+
+`.env`가 없으면 `.env.example`을 복사하고 관측 서비스를 시작하기 전에 `GRAFANA_ADMIN_PASSWORD`를 설정한다. 기존 `.env`는 덮어쓰지 않는다. `.env`는 Git 제외 파일이다.
 
 ```bash
 test -f .env || cp .env.example .env
-POSTGRES_PORT=15432 REDIS_PORT=16379 \
-APP_METRICS_TARGET=host.docker.internal:18081 \
-docker compose -p limited-ticketing-baseline -f compose.yaml -f compose.baseline.yaml \
-  --profile observability up -d
+docker compose --profile observability up -d
 ./gradlew :app:bootJar
-PORT=18081 SPRING_PROFILES_ACTIVE=local \
-DB_URL=jdbc:postgresql://localhost:15432/limited_ticketing REDIS_PORT=16379 \
+SPRING_PROFILES_ACTIVE=local \
 java -Xms256m -Xmx768m -jar app/build/libs/app-0.0.1-SNAPSHOT.jar
 ```
 
-별도 터미널에서 실행한다. Worker 설정을 바꾸면 앱과 평가 도구에 같은 환경 값을 전달한다. manifest의 JVM/Worker 값은 선언 출처를 표시하며 원격 앱의 실제 설정을 자동 조회한 값이 아니다.
+앱을 이미 다른 JVM 설정으로 실행했다면 실제 값을 `BASELINE_JVM_OPTIONS`에 기록한다. Worker 설정도 앱과 평가 도구에 같은 값을 전달한다. manifest의 JVM/Worker 값은 선언 출처를 표시하며 원격 앱 설정을 자동 조회한 값이 아니다. 아래 DB 연결은 기본 개발 계정 예이며 기존 설정이 다르면 실제 연결 값으로 바꾼다.
 
 ```bash
-export DATABASE_URL='postgresql://limited_ticketing:limited_ticketing@localhost:15432/limited_ticketing'
+export DATABASE_URL='postgresql://limited_ticketing:limited_ticketing@localhost:5432/limited_ticketing'
 export BASELINE_JVM_OPTIONS='-Xms256m -Xmx768m'
-export COMPOSE_PROJECT_NAME='limited-ticketing-baseline'
+export COMPOSE_PROJECT_NAME='limited-ticketing'
 export PROMETHEUS_URL='http://localhost:9090'
-python3 load-test/k6/run-baseline.py --flow direct --scenario smoke --base-url http://localhost:18081
-python3 load-test/k6/run-baseline.py --flow waiting --scenario smoke --base-url http://localhost:18081
+python3 load-test/k6/run-baseline.py --flow direct --scenario smoke --base-url http://localhost:8081
+python3 load-test/k6/run-baseline.py --flow waiting --scenario smoke --base-url http://localhost:8081
 ```
 
-요구 도구는 Python 3(Mac/Linux), k6, psql, Docker CLI와 Node.js(계약 테스트용)다. Prometheus는 `http://localhost:9090`, Grafana는 `http://localhost:3000`이며 Grafana 사용자는 admin, 암호는 로컬 환경 파일의 값이다. 지표는 local/test 관리자 header로만 scrape한다. 관측 판정은 base URL의 로컬 포트를 `host.docker.internal:<port>`와 대조하고, 해당 flow URI의 HTTP counter 증가를 확인한다. warmup 뒤 5초 scrape 대기와 측정 전 5초 표본을 포함한다. 기본 앱 8081과 측정 앱 18081을 혼동하지 않는다.
+요구 도구는 Python 3(Mac/Linux), k6, psql, Docker CLI와 Node.js(계약 테스트용)다. Prometheus는 `http://localhost:9090`, Grafana는 `http://localhost:3000`이며 Grafana 사용자는 admin, 암호는 로컬 환경 파일의 값이다. 지표는 local/test 관리자 header로만 scrape한다. 관측 판정은 base URL의 로컬 포트를 `host.docker.internal:<port>`와 대조하고, 해당 flow URI의 HTTP counter 증가를 확인한다. warmup 뒤 5초 scrape 대기와 측정 전 5초 표본을 포함한다.
+
+기존 DB의 활성 대기·결제 대기 구매가 있으면 측정을 거부한다. 해당 요청의 소유권과 상태를 확인해 정상 처리한 뒤 실행하며, 측정을 위해 기존 데이터를 일괄 삭제하지 않는다. 기존 환경에서 얻은 새 결과는 별도 환경에서 수집한 과거 1단계 결과와 조건을 구분한다.
 
 ### 시나리오와 판정
 
@@ -54,7 +54,7 @@ python3 load-test/k6/run-baseline.py --flow waiting --scenario smoke --base-url 
 ```bash
 for repetition in 1 2 3; do
   for flow in direct waiting; do
-    python3 load-test/k6/run-baseline.py --flow "$flow" --scenario baseline --base-url http://localhost:18081
+    python3 load-test/k6/run-baseline.py --flow "$flow" --scenario baseline --base-url http://localhost:8081
   done
 done
 ```
@@ -63,7 +63,18 @@ done
 
 HTTP p95 목표안은 500ms, waiting 최종 결과 p95 목표안은 60초다. 실제 iterations·업무 응답 수·drop과 SQL 결과를 대조한다. 종료 경계는 마지막 목표 시작과 다음 시작의 중간에 두며, raw iterations가 목표와 다르면 FAIL이다. 빈 추가 iteration을 빼서 통과시키지 않는다.
 
-### 원본과 정리
+### Git 관리와 원본 보존
+
+| 대상 | Git 관리 | 역할 |
+|---|---|---|
+| JS 시나리오·응답 계약 | 포함 | 유입 조건과 업무 응답 판정을 재현 |
+| Python 실행·판정 도구와 도구 테스트 | 포함 | fixture 준비, 결과 검증, 실패 원본 보존 |
+| SQL | 포함 | 테스트 데이터와 정합성 검증 조건을 버전 관리 |
+| 평가 보고서·실행 문서·관측 설정 | 포함 | 결과 해석과 실행 조건을 공유 |
+| `results/`의 JSON·CSV·로그 | 제외 | 실행마다 생성되는 측정 원본을 로컬 보존 |
+| `.env` | 제외 | 로컬 연결 정보와 비밀 설정 |
+
+도구는 서버의 실행 코드에 포함되지 않지만, 같은 commit의 업무 코드와 측정 방법을 함께 재현하기 위해 버전 관리한다. 보고서만 남기면 부하·정확성 판정 조건을 복구할 수 없다.
 
 `load-test/k6/results/<runId>/`의 manifest·fixture·summary·verification·samples·Prometheus 원본·stdout/stderr를 보존한다. manifest 자신을 제외한 artifact hash를 manifest에 기록한다. 원본은 Git 제외 대상이며 보고서에 manifest hash·실행 조건·보존 위치를 연결한다.
 

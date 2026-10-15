@@ -35,7 +35,7 @@ class Environment:
         self.metrics_target = f'{host}:{target.port or (443 if target.scheme == "https" else 80)}'
         self.compose = ['docker', 'compose', '-p', compose_project]
         if not os.environ.get('DATABASE_URL'):
-            raise ValueError('DATABASE_URL is required for the dedicated test database')
+            raise ValueError('DATABASE_URL is required for the target local database')
         parsed = urllib.parse.urlsplit(os.environ['DATABASE_URL'])
         if parsed.scheme not in ('postgres', 'postgresql') or not parsed.hostname or not parsed.path.strip('/'):
             raise ValueError('DATABASE_URL must be a PostgreSQL URL with a database name')
@@ -148,7 +148,7 @@ class Environment:
             (SELECT COUNT(*) FROM reservation_queue_entries WHERE status IN ('WAITING','PROCESSING')) +
             (SELECT COUNT(*) FROM purchases WHERE status = 'PENDING_PAYMENT')""")
         if int(counts) != 0:
-            raise RuntimeError('Dedicated database has active waiting entries or pending purchases; resolve their owning run first')
+            raise RuntimeError('Target database has active waiting entries or pending purchases; resolve their owning requests first')
 
     def cleanup(self, fixture, snapshot):
         if snapshot.get('redisError'):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one isolated, observable direct/waiting experiment and retain its evidence."""
+"""Run one observable direct/waiting experiment and retain its evidence."""
 import argparse
 from contextlib import ExitStack
 import json
@@ -105,7 +105,7 @@ def execute(args):
         interrupted = False
         try:
             environment = Environment(args.base_url, os.environ.get('PROMETHEUS_URL', 'http://localhost:9090'),
-                                      os.environ.get('COMPOSE_PROJECT_NAME', 'limited-ticketing-baseline'))
+                                      os.environ.get('COMPOSE_PROJECT_NAME', 'limited-ticketing'))
             resources.enter_context(environment.exclusive_run())
             environment.preflight()
             run.manifest['environment'] = environment.metadata()

@@ -22,3 +22,6 @@
 
 # Local load-test artifacts
 load-test/k6/results/
+
+# Python evaluation tooling
+__pycache__/

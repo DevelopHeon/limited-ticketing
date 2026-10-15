@@ -59,7 +59,7 @@ SPRING_PROFILES_ACTIVE=local ./gradlew :app:bootRun
 
 ## 학습 구현 진행
 
-**한정 상품 플래시세일**을 기준으로 Redis ZSET·Kafka·조회 캐시·인기/판매 랭킹·장애 복구·5,000명 부하 평가를 학습합니다. [전체 구현 계획](docs/plans/2026-10-15-flash-sale-implementation-plan.md)과 [1단계 스펙](docs/specs/2026-10-15-stage-1-observability-baseline.md)을 검토한 뒤 단계별로 진행합니다. 각 단계는 검증·한국어 commit/push 후 검토 대기하며, 다음 단계는 별도 시작 요청과 필요한 논의 후 진행합니다. 현재 1단계 기능 구현은 미착수입니다.
+**한정 상품 플래시세일**을 기준으로 Redis ZSET·Kafka·조회 캐시·인기/판매 랭킹·장애 복구·5,000명 부하 평가를 학습합니다. [전체 구현 계획](docs/plans/2026-10-15-flash-sale-implementation-plan.md)과 [1단계 스펙](docs/specs/2026-10-15-stage-1-observability-baseline.md)을 검토한 뒤 단계별로 진행합니다. 각 단계는 검증·한국어 commit/push 후 검토 대기하며, 다음 단계는 별도 시작 요청과 필요한 논의 후 진행합니다. 현재 1단계 관측·기준선 구현과 검증을 진행합니다.
 
 ## 문서
 

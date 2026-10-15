@@ -31,3 +31,18 @@ limited-ticketing:
       recovery-initial-delay: ${QUEUE_RECOVERY_INITIAL_DELAY:5000}
       recovery-batch-size: ${QUEUE_RECOVERY_BATCH_SIZE:1000}
       processing-timeout-seconds: ${QUEUE_PROCESSING_TIMEOUT_SECONDS:30}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+      discovery:
+        enabled: false
+  endpoint:
+    health:
+      show-details: never
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true

@@ -87,6 +87,8 @@ package com.example.limitedticketing.member.application.port.in;
 
 다른 모듈을 호출할 때는 대상 모듈의 `application.port.in` Facade와 `application.port.in.dto`만 참조한다. 대상 모듈의 Domain 모델, JPA Entity, Spring Data Repository, 내부 Command/Query Service는 직접 참조하지 않는다.
 
+현재 Scheduler는 infrastructure에 있으며, 입력·출력 어댑터를 역할별로 배치하는 [ADR 0005](../adr/0005-inbound-outbound-adapters.md)를 2단계부터 적용한다. 아래 구조는 현재 구현 기준이다.
+
 ## 레이어 구조
 
 모든 도메인 모듈은 아래 구조를 기본으로 사용한다. 필요한 코드가 없으면 패키지를 미리 만들지 않는다.

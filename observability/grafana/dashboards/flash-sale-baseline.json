@@ -1,0 +1,293 @@
+{
+  "uid": "flash-sale-baseline",
+  "title": "Flash Sale Baseline",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Scrape UP",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=\"flash-sale\"}",
+          "legendFormat": "{{uri}} {{status}} {{__name__}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No samples"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "HTTP requests / second",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (uri,status) (rate(http_server_requests_seconds_count{job=\"flash-sale\",uri!~\"/actuator.*\"}[$__rate_interval]))",
+          "legendFormat": "{{uri}} {{status}} {{__name__}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No samples"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "HTTP p95 seconds",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le,uri) (rate(http_server_requests_seconds_bucket{job=\"flash-sale\",uri!~\"/actuator.*\"}[$__rate_interval])))",
+          "legendFormat": "{{uri}} {{status}} {{__name__}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No samples"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "HTTP p99 seconds",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum by (le,uri) (rate(http_server_requests_seconds_bucket{job=\"flash-sale\",uri!~\"/actuator.*\"}[$__rate_interval])))",
+          "legendFormat": "{{uri}} {{status}} {{__name__}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No samples"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "HTTP 5xx / second",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_server_requests_seconds_count{job=\"flash-sale\",status=~\"5..\"}[$__rate_interval]))",
+          "legendFormat": "{{uri}} {{status}} {{__name__}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No samples"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "title": "JVM heap bytes",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(jvm_memory_used_bytes{job=\"flash-sale\",area=\"heap\"})",
+          "legendFormat": "{{uri}} {{status}} {{__name__}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No samples"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "title": "GC pause seconds / second",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(jvm_gc_pause_seconds_sum{job=\"flash-sale\"}[$__rate_interval]))",
+          "legendFormat": "{{uri}} {{status}} {{__name__}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No samples"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "title": "Live threads",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "jvm_threads_live_threads{job=\"flash-sale\"}",
+          "legendFormat": "{{uri}} {{status}} {{__name__}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No samples"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "title": "Hikari active / pending",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{__name__=~\"hikaricp_connections_(active|pending)\",job=\"flash-sale\"}",
+          "legendFormat": "{{uri}} {{status}} {{__name__}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No samples"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "title": "Hikari timeouts / second",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(hikaricp_connections_timeout_total{job=\"flash-sale\"}[$__rate_interval]))",
+          "legendFormat": "{{uri}} {{status}} {{__name__}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No samples"
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

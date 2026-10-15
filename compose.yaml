@@ -25,5 +25,45 @@ services:
       timeout: 5s
       retries: 10
 
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    profiles: [observability]
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    environment:
+      APP_METRICS_TARGET: ${APP_METRICS_TARGET:-host.docker.internal:8081}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - 'sed "s/APP_METRICS_TARGET/$${APP_METRICS_TARGET}/g" /etc/prometheus/template.yml > /tmp/prometheus.yml; exec /bin/prometheus --config.file=/tmp/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=7d'
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/template.yml:ro
+      - prometheus-data:/prometheus
+    cpus: 0.5
+    mem_limit: 512m
+
+  grafana:
+    image: grafana/grafana:13.2.4
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - 'test -n "$$GF_SECURITY_ADMIN_PASSWORD" || { echo "GRAFANA_ADMIN_PASSWORD is required"; exit 1; }; exec /run.sh'
+    profiles: [observability]
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    cpus: 0.5
+    mem_limit: 512m
+
 volumes:
   postgres-data:
+  prometheus-data:
+  grafana-data:

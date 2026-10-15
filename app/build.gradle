@@ -9,6 +9,8 @@ dependencies {
     implementation project(':payment')
     implementation project(':purchasewaiting')
 
+    implementation rootProject.libraries.bootActuator
+    implementation rootProject.libraries.prometheusRegistry
     implementation rootProject.libraries.bootDataJpa
     implementation rootProject.libraries.bootDataRedis
     implementation rootProject.libraries.bootSecurity

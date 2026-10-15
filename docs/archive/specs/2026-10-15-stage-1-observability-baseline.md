@@ -1,8 +1,8 @@
 # 1단계 스펙 · 관측과 재현 가능한 플래시세일 기준선
 
-상태: **작성 완료·검토 대기 / 구현 미착수**. 작성일: 2026-10-15. 기준 코드: `0b723512e2bf5c28ba6c80a7173f4e55d8efa00e`.
+상태: **실행 인수 완료·검토 대기 / 1단계 보관 스펙**. 작성일: 2026-10-15. 기준 코드: `0b723512e2bf5c28ba6c80a7173f4e55d8efa00e`.
 
-전체 제품·학습 범위와 단계 종료 규칙은 [구현 계획](../plans/2026-10-15-flash-sale-implementation-plan.md)을 따른다. 이 문서는 **1단계의 구현 계약과 인수 기준**을 소유한다. 아래 신규 경로·도구·설정은 구현 예정이며 현재 사용 가능한 기능으로 설명하지 않는다.
+전체 제품·학습 범위와 단계 종료 규칙은 [구현 계획](../../plans/2026-10-15-flash-sale-implementation-plan.md)을 따른다. 이 문서는 **1단계의 구현 계약과 인수 기준**을 소유한다. 현재 실행 절차는 부하 가이드, 검증 결과와 미달 목표는 1단계 평가가 소유한다. 이 문서는 구현한 1단계 계약의 보관본이다. 측정 revision은 f10edf1, 판정/소유권 보완 revision은 5213635·2049265·6f18fee다.
 
 ## 1. 목적과 범위
 
@@ -16,15 +16,15 @@
 
 | 근거 | 현재 상태 | 이번 단계에 주는 제약 |
 |---|---|---|
-| [구매 Service](../../purchase/src/main/java/com/example/limitedticketing/purchase/application/command/service/PurchaseCommandService.java) | 회원·판매 검사, DB 멱등성, 조건부 재고 예약, 5분 만료 | 유효한 새 회원·판매·키로만 비교 |
-| [대기 Service](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/command/service/ReservationQueueCommandService.java) | DB 커밋 후 Redis 등록 | 202가 최종 예약 성공을 의미하지 않음 |
-| [Worker](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/infrastructure/scheduler/ReservationQueueWorker.java) | 기본 상품별 슬롯 10, claim 10, 주기 100ms, 복구 5초·timeout 30초 | 설정·관측 기간을 manifest에 고정 |
-| [기존 direct 시나리오](../../load-test/k6/sale-open.js) | VU당 1회, 키 발급 setup | 기존 waiting arrival 모델과 그대로 비교하면 유입 조건이 다름 |
-| [기존 waiting 시나리오](../../load-test/k6/waiting-room.js) | iteration 중 키 발급 후 접수, 응답 본문의 실패 check가 threshold와 분리됨 | 새 시나리오는 키 선발급·payload 검증·정확한 실행 건수 확인 |
-| [기존 SQL](../../load-test/k6/sql/verify-waiting-room.sql) | 상태별 수량 출력 | 출력만 보고 사람이 통과 판단하지 않도록 자동 판정 추가 |
-| [보안 설정](../../app/src/main/java/com/example/limitedticketing/configuration/security/SecurityConfig.java) | `/api` 밖 요청은 기본 허용 | Actuator 추가 시 명시적 접근 규칙 필요 |
+| [구매 Service](../../../purchase/src/main/java/com/example/limitedticketing/purchase/application/command/service/PurchaseCommandService.java) | 회원·판매 검사, DB 멱등성, 조건부 재고 예약, 5분 만료 | 유효한 새 회원·판매·키로만 비교 |
+| [대기 Service](../../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/command/service/ReservationQueueCommandService.java) | DB 커밋 후 Redis 등록 | 202가 최종 예약 성공을 의미하지 않음 |
+| [Worker](../../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/infrastructure/scheduler/ReservationQueueWorker.java) | 기본 상품별 슬롯 10, claim 10, 주기 100ms, 복구 5초·timeout 30초 | 설정·관측 기간을 manifest에 고정 |
+| [기존 direct 시나리오](../../../load-test/k6/sale-open.js) | VU당 1회, 키 발급 setup | 기존 waiting arrival 모델과 그대로 비교하면 유입 조건이 다름 |
+| [기존 waiting 시나리오](../../../load-test/k6/waiting-room.js) | iteration 중 키 발급 후 접수, 응답 본문의 실패 check가 threshold와 분리됨 | 새 시나리오는 키 선발급·payload 검증·정확한 실행 건수 확인 |
+| [기존 SQL](../../../load-test/k6/sql/verify-waiting-room.sql) | 상태별 수량 출력 | 출력만 보고 사람이 통과 판단하지 않도록 자동 판정 추가 |
+| [보안 설정](../../../app/src/main/java/com/example/limitedticketing/configuration/security/SecurityConfig.java) | `/api` 밖 요청은 기본 허용 | Actuator 추가 시 명시적 접근 규칙 필요 |
 
-현재 아키텍처·단위/통합 테스트 책임은 [설계](../architecture/README.md), [테스트 기준](../development/testing.md)을 따른다. 이전 성능 JSON은 [기존 평가](../evaluations/load-testing/2026-10-15-existing-results.md)로 유지하고 새 실행과 섞지 않는다.
+현재 아키텍처·단위/통합 테스트 책임은 [설계](../../architecture/README.md), [테스트 기준](../../development/testing.md)을 따른다. 이전 성능 JSON은 [기존 평가](../../evaluations/load-testing/2026-10-15-existing-results.md)로 유지하고 새 실행과 섞지 않는다.
 
 ## 3. 관측 실행 구성과 HTTP 계약
 
@@ -50,6 +50,8 @@ SPRING_PROFILES_ACTIVE=local ./gradlew :app:bootRun
 ```
 
 관측 도구와 앱을 같은 머신에서 실행한 결과임을 표시한다. 별도 부하 발생기로 바꾸면 새 환경의 평가로 구분한다. Grafana 설정의 암호는 로컬 환경 변수로 주입하고 manifest에서 제외한다.
+
+이번 측정 환경은 현재 Mac의 별도 Compose project `limited-ticketing-baseline`이다. 앱 18081, PostgreSQL 15432, Redis 16379, Prometheus 9090, Grafana 3000을 사용한다. PostgreSQL 1CPU/1GB, Redis 0.5CPU/256MB, 관측 서비스 각각 0.5CPU/512MB, 호스트 앱 JVM `-Xms256m -Xmx768m`로 측정한다. 기본 개발 연결 값은 유지하고 `.env` 및 `APP_METRICS_TARGET`으로 측정 환경을 분리한다. Prometheus v3.15.0·Grafana 13.2.4를 고정하고 실제 image digest는 manifest에서 기록한다.
 
 ### 3.2 접근과 계측
 
@@ -87,11 +89,11 @@ python3 load-test/k6/run-baseline.py --flow waiting --scenario baseline --base-u
 
 | scenario | 고유 회원/iteration | rate | duration | 초기 재고 | preAllocatedVUs / maxVUs |
 |---|---:|---:|---:|---:|---:|
-| `smoke` | 10 | 10/s | 1초 | 3 | 20 / 100 |
+| `smoke` | 10 | 5/s | 2초 | 3 | 20 / 100 |
 | `baseline` | 1,000 | 100/s | 10초 | 100 | 200 / 1,000 |
 | `observe-5000` | 5,000 | 500/s | 10초 | 500 | 500 / 2,000 |
 
-새 `flash-sale-baseline.js`는 두 flow 모두 `constant-arrival-rate`로 실행한다. iteration당 업무 HTTP 요청은 1회이고 key 발급·polling·결제·재시도는 측정 구간에 넣지 않는다. 계획 요청 수는 `rate × duration`, scenario duration은 기존처럼 경계의 추가 예약을 피하도록 `duration*1000-1ms`로 구성하되 **실제 iterations·수락/업무 결과 합계가 목표와 같은지 별도로 검증**한다. 건수 차이는 임의 보정하지 않는다. `gracefulStop=30s`, 개별 HTTP timeout 10초다.
+새 `flash-sale-baseline.js`는 두 flow 모두 `constant-arrival-rate`로 실행한다. iteration당 업무 HTTP 요청은 1회이고 key 발급·polling·결제·재시도는 측정 구간에 넣지 않는다. 계획 요청 수는 `rate × duration`, k6 2.1.0의 최소 1초 제약과 마지막 경계의 추가 iteration을 함께 피하도록 scenario 종료는 마지막 목표 시작 시각과 다음 시작 시각의 중간인 `duration*1000 - 500/rate` ms로 둔다. 부하를 건너뛰는 guard가 실행되어 raw iterations가 늘어난 경우에도 workload는 실패로 남긴다. Smoke는 2초·5/s로 조정해 10건을 유지하며 baseline은 10초·100/s, observe-5000은 10초·500/s를 유지한다. **실제 iterations·수락/업무 결과 합계가 목표와 같은지 별도로 검증**한다. 건수 차이는 임의 보정하지 않는다. `gracefulStop=30s`, 개별 HTTP timeout 10초다.
 
 상품별 Worker 슬롯·claim·지연·복구 설정은 기존 기본값을 사용하고 manifest에 기록한다. 실험 중 동작 설정을 바꾸지 않는다. direct도 Worker·관측 설정을 동일하게 유지하고 측정 fixture에 대기 요청만 만들지 않는다. 전용 실험 DB에 다른 활성 대기가 없어야 한다. setup 시작 시와 측정 직전 이를 확인하고 있으면 실행을 거부한다. 이전 실험의 구매 만료 작업도 측정에 섞이지 않게 실행 전 정리한다. 정리는 원본 수집 뒤 실험 소유 회원/판매의 PENDING_PAYMENT 구매만 기존 취소 API로 반환하고 판매를 닫는 방식으로 하며, 업무 외 행을 수정하거나 전체 DB/Redis를 삭제하지 않는다. warmup도 drain·정리 후 측정 fixture를 준비한다. 정리 실패는 기록하고 다음 실행 전에 해결한다. 검증 snapshot은 정리 전 시각의 결과임을 표시한다.
 
@@ -125,7 +127,7 @@ k6 summary에는 `iterations`, `dropped_iterations`, `checks`, 요청/응답 오
 
 waiting의 `completed_at-created_at` p50/p95/p99를 DB에서 계산해 **접수부터 대기 결과 확정 시간**으로 저장한다. HTTP 접수 p95와 합치지 않는다. 표본 수·processing 경과·잔여 건수를 함께 남긴다. direct는 HTTP 응답이 업무 완료 시점이므로 그 지연을 비교하되 waiting의 단순 202 응답과 같은 의미라고 주장하지 않는다.
 
-측정 시작부터 drain 종료까지 1초마다 `samples.csv`에 UTC 시각·Redis waiting/processing 수·해당 DB Lock 대기 세션 수를 수집한다. 명령 실패는 누락/오류로 표시하고 0으로 바꾸지 않는다. 설정한 관측 overhead는 baseline 보고서에 제한으로 기재한다. Prometheus의 해당 구간 HTTP/JVM/Hikari 시계열을 조회해 `prometheus.json`으로 보존한다. 표본 누락과 scrape 실패는 보고서에 표시한다.
+측정 시작부터 drain 종료까지 1초마다 `samples.csv`에 UTC 시각·Redis waiting/processing 수·해당 DB Lock 대기 세션 수를 수집한다. 명령 실패는 누락/오류로 표시하고 0으로 바꾸지 않는다. 설정한 관측 overhead는 baseline 보고서에 제한으로 기재한다. 최종 요청이 scrape에 들어오도록 결과 검증 뒤 5초의 scrape grace를 관측 구간에 포함하며 측정·drain·관측 종료 시각을 구분한다. Prometheus의 해당 구간 HTTP/JVM/Hikari 시계열을 조회해 `prometheus.json`으로 보존한다. 표본 누락과 scrape 실패는 보고서에 표시한다.
 
 ## 6. 산출물·판정·원본 보존
 
@@ -164,7 +166,7 @@ fixture에는 로컬 테스트 회원과 요청 키만 담고 DB URL 비밀번�
 
 | ID | 검증 | 합격 근거 |
 |---|---|---|
-| S1-01 | 지표 접근 정책·기존 API 인증 회귀 | MockMvc+Testcontainers 통합 테스트, 관리자 200/회원403/비인증401 |
+| S1-01 | 지표 접근 정책·기존 API 인증 회귀 | 실제 HTTP TestRestTemplate+Testcontainers 통합 테스트, 관리자 200/회원403/비인증401 |
 | S1-02 | HTTP/JVM/Hikari·Prometheus·Grafana 연결 | 실제 요청 후 계측 count 증가, scrape UP·패널 데이터 |
 | S1-03 | 입력·fixture·출력 경로 안전성 | 중복 입력/기존 run 경로 거부, direct/waiting 새 fixture 비간섭 |
 | S1-04 | 예상 업무 실패와 시스템 실패 구분 | 품절 외 409·payload 오류·drop·timeout을 실패로 판정 |
@@ -190,3 +192,5 @@ Java 테스트는 한국어 `@DisplayName`으로 업무/접근 규칙을 설명�
 - [Spring Boot Actuator 보안](https://docs.spring.io/spring-boot/3.5/reference/actuator/endpoints.html#actuator.endpoints.security): 사용자 SecurityFilterChain이 있을 때 접근 정책을 직접 구성.
 - [Prometheus scrape 설정](https://prometheus.io/docs/prometheus/latest/configuration/configuration/): scrape interval·HTTP header 지원. 실제 고정 버전의 지원 여부를 구현 시 확인.
 - [k6 arrival-rate](https://grafana.com/docs/k6/latest/using-k6/scenarios/executors/constant-arrival-rate/): iteration 시작률과 VU의 구분.
+
+현재 문서: [실행 가이드](../../performance/load-testing.md), [평가 결과](../../evaluations/load-testing/2026-10-15-stage-1-baseline.md), [진행 상태](../../plans/roadmap.md).

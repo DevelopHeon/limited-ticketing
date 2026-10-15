@@ -8,9 +8,9 @@
 
 **기술:** Java 17, Spring Boot 3.5.16, Spring Modulith 1.4.12, PostgreSQL 17, Redis 7, Kafka, k6, Micrometer·Prometheus·Grafana. 새 제품의 patch 버전과 image digest는 해당 단계 시작 시 확인해 고정하고 실행 manifest에 기록한다.
 
-**1단계 스펙:** [관측과 재현 가능한 기준선](../specs/2026-10-15-stage-1-observability-baseline.md). 이후 단계는 시작 요청 후 직전 결과를 검토하고 해당 단계 스펙을 확정한다.
+**1단계 스펙:** [관측과 재현 가능한 기준선](../archive/specs/2026-10-15-stage-1-observability-baseline.md). 이후 단계는 시작 요청 후 직전 결과를 검토하고 해당 단계 스펙을 확정한다.
 
-작성일: 2026-10-15. 기준 revision: `0b723512e2bf5c28ba6c80a7173f4e55d8efa00e`. **계획 작성 완료·검토 대기이며 기능 구현은 시작하지 않았다.** 현재 계약은 [아키텍처](../architecture/README.md), 진행 상태는 [로드맵](roadmap.md)이 소유한다.
+작성일: 2026-10-15. 기준 revision: `0b723512e2bf5c28ba6c80a7173f4e55d8efa00e`. **1단계 실행 인수 완료·검토 대기다. [결과](../evaluations/load-testing/2026-10-15-stage-1-baseline.md)를 검토하고 2단계는 별도 시작 요청 뒤 진행한다.** 현재 계약은 [아키텍처](../architecture/README.md), 진행 상태는 [로드맵](roadmap.md)이 소유한다.
 
 ## 1. 확정한 제품 범위와 학습 목표
 
@@ -87,6 +87,14 @@ flowchart TD
 
 대기 Redis와 조회 Redis는 eviction·메모리·복구 정책을 분리한다. Kafka 학습 구성은 일반 Consumer Group을 기준으로 한다. key=`saleProductId`의 집중·분산 상황과 bucket 분산의 순서 비용을 비교한다. Broker 장애 실험은 3개 Broker·복제 3·`min.insync.replicas=2`·`acks=all`을 기준안으로 하며 실제 버전·KRaft 구성은 3단계에서 확정한다. 같은 호스트의 프로세스 장애와 호스트 장애를 구분한다.
 
+### 입력·출력 어댑터 배치 결정
+
+사용자와 합의한 방향: Controller·Kafka Consumer·Scheduler는 `presentation`의 입력 어댑터, Redis ZSET/캐시·Kafka Producer·JPA는 `infrastructure`의 출력 어댑터로 둔다. [ADR 0005](../adr/0005-inbound-outbound-adapters.md)를 따른다.
+
+현재 Scheduler/Worker의 실행 주기는 입력 어댑터로 옮기고, 조회·claim·예약·완료·슬롯 반환의 업무 조율은 Application Service로 분리한다. 입력 어댑터는 입력 Facade만 사용하며 Kafka record/ack 타입·Redis 명령을 Application에 전달하지 않는다. 같은 모듈의 내부 입력 계약을 다른 모듈의 Named Interface로 불필요하게 공개하지 않는다.
+
+이 책임 분리와 ArchUnit 검증 보완은 **2단계**에 포함한다. 3단계 Consumer부터 같은 원칙을 적용한다. 1단계에서는 측정 기준선을 확보하기 위해 기존 Worker를 이동하거나 업무 알고리즘을 바꾸지 않는다.
+
 ## 5. 단계별 산출물과 검토 지점
 
 각 단계는 **구현·검증·측정 결과를 독립적으로 검토할 수 있는 단위**다. 최종 목표가 축소되는 순서가 아니라 학습 결과를 확인하는 순서다.
@@ -94,7 +102,7 @@ flowchart TD
 | 단계 | 구현 산출물 | 학습·인수 증거 | 시작 전에 논의할 사항 |
 |---|---|---|---|
 | 1. 관측·재현 기준선 | Actuator/Prometheus/Grafana, 공통 부하 시나리오, fixture·manifest·SQL 검증 | 같은 조건의 직접/대기 기준선과 원본 연결, 정확성 검증 | 장비·자원, 실행 도구 버전, 성능 목표 검토 |
-| 2. ZSET 대기 정합성·입구 보호 | 순번 유실/동점 커서 복구, DB 조건부 claim·처리 시도 식별, 수용량·요청 제한, 직접 경로 제한 | Redis 유실·오래 실행 중 복구·중복 claim·배치 경계 테스트, ZSET 크기/claim 배치 비교 | 순번 원장·할당, lease/fencing, 429/503, 전역/상품 슬롯과 공정성 |
+| 2. ZSET 대기 정합성·입구 보호 | 입력 Scheduler/업무 Worker 책임 분리, 순번 유실/동점 커서 복구, DB 조건부 claim·처리 시도 식별, 수용량·요청 제한, 직접 경로 제한 | Redis 유실·오래 실행 중 복구·중복 claim·배치 경계 테스트, ZSET 크기/claim 배치 비교 | 순번 원장·할당, lease/fencing, 429/503, 전역/상품 슬롯과 공정성 |
 | 3. Kafka·Outbox 예약 전달 | 입장 상태+Outbox, Publisher, Consumer, API/Worker 실행 역할 분리 | 전달 경계별 종료·재소비, 동일 업무 효과 1회, lag·partition 분포 | 이벤트 envelope·version·key·partition 수, offset·retry/DLT·Publisher 순서 |
 | 4. 상품 조회 캐시 | 별도 조회 Redis, 상세/목록 캐시, TTL·무효화·동시 miss 제어 | cold/warm·일괄 조회·캐시 유실·갱신 지연 비교 | 캐시 대상·key·TTL·허용 stale·eviction·상품 변경 계약 |
 | 5. 인기·판매 랭킹 | 조회/결제 이벤트 집계, 일별·7일 ZSET, TOP N 조회·상품 캐시 결합 | 중복·자정·late event·캐시 hit 집계·판매 점수 재구성 | 모듈 소유권·event 보존·동점·필터·갱신 SLO·인기 누락 허용 |
@@ -121,7 +129,7 @@ flowchart TD
 
 ## 7. 1단계 실행 작업
 
-1단계의 값·계약·인수 기준은 [스펙](../specs/2026-10-15-stage-1-observability-baseline.md)이 소유한다. 아래 예정 경로는 아직 생성되지 않은 파일을 포함한다. 구현 시 기존 파일 변화가 있으면 스펙과 함께 조정한다.
+1단계의 값·계약·인수 기준은 [스펙](../archive/specs/2026-10-15-stage-1-observability-baseline.md)이 소유한다. 아래는 완료한 1단계 작업 기록이다. 스펙은 보관 위치로 이동했으며 현재 실행 절차와 결과는 가이드/평가 문서를 따른다.
 
 ### 공통 제약
 
@@ -142,36 +150,36 @@ flowchart TD
 
 인수 연결: S1-01, S1-02.
 
-**변경:** `build.gradle`, `app/build.gradle`, `app/src/main/resources/application.yml`, `app/src/main/java/com/example/limitedticketing/configuration/security/SecurityConfig.java`, `compose.yaml`.
+**변경:** `build.gradle`, `app/build.gradle`, `app/src/main/resources/application.yml`, `app/src/main/java/com/example/limitedticketing/configuration/security/SecurityConfig.java`, `compose.yaml`, `compose.baseline.yaml`.
 
 **생성:** `observability/prometheus/prometheus.yml`, `observability/grafana/provisioning/datasources/prometheus.yml`, `observability/grafana/provisioning/dashboards/dashboards.yml`, `observability/grafana/dashboards/flash-sale-baseline.json`, `app/src/test/java/com/example/limitedticketing/integration/observability/ObservabilityIntegrationTest.java`.
 
 **계약:** 기존 `local/test` 관리자 인증으로 `/actuator/prometheus`를 읽는다. `observability` Compose profile이 호스트 앱을 scrape한다. 상세 설정은 스펙 §3을 따른다.
 
-- [ ] 지표 접근 제어·요청 계측을 검증하는 통합 테스트를 먼저 작성한다. 정확성 실패 요청도 HTTP 결과로 계측하고 회원별 label은 만들지 않는다.
-- [ ] 다음 테스트가 의도한 이유로 실패하는지 확인한다.
+- [x] 지표 접근 제어·요청 계측을 검증하는 통합 테스트를 먼저 작성한다. 정확성 실패 요청도 HTTP 결과로 계측하고 회원별 label은 만들지 않는다.
+- [x] 다음 테스트가 의도한 이유로 실패하는지 확인한다.
 
 ```bash
 ./gradlew :app:test --tests '*ObservabilityIntegrationTest'
 ```
 
-- [ ] Actuator·Prometheus registry와 접근 정책, Compose profile과 자동 provisioning을 구현한다.
-- [ ] 같은 테스트를 통과시키고 Compose profile 기동·scrape UP·대시보드 데이터 표시를 확인한다. 관측 구성 유무에 따른 Smoke의 업무 결과가 같아야 한다.
+- [x] Actuator·Prometheus registry와 접근 정책, Compose profile과 자동 provisioning을 구현한다.
+- [x] 같은 테스트를 통과시키고 Compose profile 기동·scrape UP·대시보드 데이터 표시를 확인한다. 관측 구성 유무에 따른 Smoke의 업무 결과가 같아야 한다.
 
 ### Task 1.2 · 같은 유입 모델의 직접/대기 평가 도구
 
 인수 연결: S1-03, S1-04, S1-05, S1-06.
 
-**생성:** `load-test/k6/flash-sale-baseline.js`, `load-test/k6/sql/prepare-flash-sale.sql`, `load-test/k6/sql/verify-flash-sale.sql`, `load-test/k6/run-baseline.py`, `load-test/k6/test_run_baseline.py`.
+**생성:** `load-test/k6/baseline_results.py`, `load-test/k6/baseline_environment.py`, `load-test/k6/lib/baseline-contract.mjs`, `load-test/k6/baseline-contract.test.mjs`, `load-test/k6/flash-sale-baseline.js`, `load-test/k6/sql/prepare-flash-sale.sql`, `load-test/k6/sql/verify-flash-sale.sql`, `load-test/k6/run-baseline.py`, `load-test/k6/test_run_baseline.py`.
 
 **기존 유지:** `sale-open.js`, `waiting-room.js`와 기존 SQL은 이전 기록의 실행 계약으로 유지한다. 새로운 공통 시나리오는 기존 업무 API를 호출한다.
 
 **입출력:** `run-baseline.py --flow {direct,waiting} --scenario {smoke,baseline,observe-5000} --base-url URL --output-root PATH` → 고유 run 디렉터리의 manifest·fixture·summary·검증·샘플·원본. Python 3 표준 라이브러리로 `psql`, `k6`, Docker CLI를 인자 배열로 호출하고 셸 문자열 보간을 사용하지 않는다.
 
-- [ ] 표준 라이브러리 `unittest`로 `test_existing_run_is_not_overwritten`, `test_non_inventory_conflict_is_unexpected`, `test_dropped_iterations_fail_workload`, `test_quantity_mismatch_fails_integrity`, `test_timeout_preserves_partial_artifacts`를 작성해 각각 재실행 덮어쓰기 방지, 품절 외 409 분류, drop, SQL 수량 불일치, timeout 결과 보존을 검증한다. Python 테스트는 한국어 설명 docstring을 둔다.
-- [ ] `python3 -m unittest discover -s load-test/k6 -p test_run_baseline.py`로 테스트가 의도한 이유로 실패하는지 확인하고 fixture·검증 SQL·k6 시나리오·실행 조율을 구현한다. 외부 프로세스 호출은 대체해 실패 분기를 검증하고 실제 Smoke로 연결을 확인한다.
-- [ ] 같은 유입 모델·초기 수량·Worker 설정을 사용하는 direct/waiting Smoke를 각각 실행한다. 키 발급은 측정 전 완료하고 다른 fixture로 warmup한다.
-- [ ] 의도적으로 잘못된 기대 재고와 불완전 summary를 입력했을 때 도구가 실패를 보고하고 원본을 남기는지 확인한다. 무의미한 DTO/설정 접근자 테스트는 만들지 않는다.
+- [x] 실제 k6가 사용하는 응답 분류를 Node `node:test`로 검증하고, 표준 라이브러리 `unittest`로 `test_existing_run_is_not_overwritten`, `test_unexpected_responses_fail_workload`, `test_dropped_iterations_fail_workload`, `test_quantity_mismatch_fails_integrity`, `test_timeout_preserves_partial_artifacts`를 작성해 각각 재실행 덮어쓰기 방지, 품절 외 409 분류, drop, SQL 수량 불일치, timeout 결과 보존을 검증한다. Python 테스트는 한국어 설명 docstring, Node 테스트는 한국어 테스트 이름을 둔다.
+- [x] `python3 -m unittest discover -s load-test/k6 -p test_run_baseline.py`로 테스트가 의도한 이유로 실패하는지 확인하고 fixture·검증 SQL·k6 시나리오·실행 조율을 구현한다. 외부 프로세스 호출은 대체해 실패 분기를 검증하고 실제 Smoke로 연결을 확인한다.
+- [x] 같은 유입 모델·초기 수량·Worker 설정을 사용하는 direct/waiting Smoke를 각각 실행한다. 키 발급은 측정 전 완료하고 다른 fixture로 warmup한다.
+- [x] 의도적으로 잘못된 기대 재고와 불완전 summary를 입력했을 때 도구가 실패를 보고하고 원본을 남기는지 확인한다. 무의미한 DTO/설정 접근자 테스트는 만들지 않는다.
 
 ### Task 1.3 · 기준선 기록과 단계 종료
 
@@ -181,11 +189,18 @@ flowchart TD
 
 **평가 생성:** `docs/evaluations/load-testing/<실제 정리일>-stage-1-baseline.md`. raw artifact는 Git 제외 경로에 보존하고 hash·보존 위치를 연결한다.
 
-- [ ] `./gradlew check`와 Python 테스트를 통과시킨다.
-- [ ] fresh fixture로 baseline을 direct/waiting 각각 3회, observe-5000을 각각 1회 실행한다. 장비가 부족하면 관측 실패·자원 상한을 기록하고 5,000명 달성을 주장하지 않는다.
-- [ ] HTTP 지연·최종 업무 결과·대기 완료 시간·DB 락·연결 대기·JVM·관측 overhead를 해석한다. 서로 다른 실험의 percentile을 합쳐 하나의 percentile로 만들지 않는다.
-- [ ] 1단계 인수 기준과 알려진 한계, 2단계 논의 사항을 보고서와 로드맵에 반영한다.
-- [ ] 한국어 commit/push 후 원격 반영을 확인하고 **검토 대기에서 종료**한다.
+- [x] `./gradlew check`와 Python 테스트를 통과시킨다.
+- [x] fresh fixture로 baseline을 direct/waiting 각각 3회, observe-5000을 각각 1회 실행한다. 장비가 부족하면 관측 실패·자원 상한을 기록하고 5,000명 달성을 주장하지 않는다.
+- [x] HTTP 지연·최종 업무 결과·대기 완료 시간·DB 락·연결 대기·JVM·관측 overhead를 해석한다. 서로 다른 실험의 percentile을 합쳐 하나의 percentile로 만들지 않는다.
+- [x] 1단계 인수 기준과 알려진 한계, 2단계 논의 사항을 보고서와 로드맵에 반영한다.
+- [x] 한국어 commit/push 후 원격 반영을 확인하고 **검토 대기에서 종료**한다.
+
+### 실행 중 확인한 조정
+
+- 측정 환경은 사용자 선택에 따라 현재 Mac의 별도 앱·DB·Redis다. 기존 디버거 앱을 유지하며 앱 18081·DB 15432·Redis 16379를 사용한다.
+- k6 2.1.0은 999ms를 거부하고 정확한 1초는 경계에서 11번째 iteration을 시작했다. Smoke를 2초·5/s로 조정하고 종료 경계를 마지막 목표 시작과 다음 시작의 중간(`duration*1000 - 500/rate` ms)으로 둔다. 1ms만 줄인 Smoke에서도 타이머 경합으로 추가 iteration이 관찰됐기 때문이다. 실제 iterations와 목표 건수를 대조하며 결과를 보정하지 않는다.
+- 응답 분류는 k6가 실행하는 JS를 직접 검증하고, Python은 원본 보존·DB 정합성과 실행 조율을 검증한다.
+- 실제 Servlet 계측을 확인하도록 지표 통합 테스트는 MockMvc 대신 임의 포트의 TestRestTemplate을 사용한다.
 
 ## 8. 다음 단계에서 확인할 질문
 

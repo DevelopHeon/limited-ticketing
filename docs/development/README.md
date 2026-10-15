@@ -83,3 +83,7 @@ Redis 대기열 테스트 데이터 생성부터 Smoke/Load 실행, Redis 관찰
 ## 코드 검증
 
 테스트 책임과 검사 명령은 [테스트 기준](testing.md)에서 관리한다.
+
+## 관측과 자동 기준선
+
+Actuator의 health는 상세 내부 정보 없이 공개하고, prometheus는 local/test 관리자에게만 제공한다. 다른 Actuator 경로는 차단한다. `observability` Compose profile로 Prometheus/Grafana를 시작하며 `.env`의 Grafana 암호를 먼저 설정한다. 전용 DB·Redis·앱 실행과 평가 도구 사용은 [자동 기준선](../performance/load-testing.md#자동-기준선--현재-평가-도구)을 따른다.

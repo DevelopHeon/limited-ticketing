@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 5s
+scrape_configs:
+  - job_name: flash-sale
+    metrics_path: /actuator/prometheus
+    http_headers:
+      X-Admin-Id:
+        values: [admin]
+    static_configs:
+      - targets: [APP_METRICS_TARGET]

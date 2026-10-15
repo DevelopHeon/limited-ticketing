@@ -6,7 +6,7 @@ from unittest.mock import patch
 from baseline_environment import Environment
 from pathlib import Path
 
-from baseline_results import RunArtifacts, evaluate_results
+from baseline_results import RunArtifacts, evaluate_results, observations_complete
 
 
 def summary():
@@ -28,7 +28,8 @@ def verification():
             "inventory": {"available": 0, "reserved": 3, "sold": 0, "total": 3},
             "mismatchedConnections": 0, "duplicateConnections": 0,
             "duplicatePurchases": 0, "foreignMembers": 0,
-            "redis": {"waiting": 0, "processing": 0}}
+            "redis": {"waiting": 0, "processing": 0},
+            "completionSeconds": {"count": 10, "p95": 5}}
 
 
 def evaluate(data=None, db=None, observations=True):
@@ -37,6 +38,43 @@ def evaluate(data=None, db=None, observations=True):
 
 
 class BaselineResultTest(unittest.TestCase):
+    def test_only_one_run_can_use_a_database(self):
+        """같은 전용 DB를 동시에 측정해 서로의 부하가 섞이는 실행을 거부한다."""
+        with tempfile.TemporaryDirectory() as folder, patch('tempfile.gettempdir', return_value=folder):
+            with patch.dict('os.environ', {'DATABASE_URL': 'postgresql://test:test@localhost/test'}):
+                first = Environment('http://localhost', 'http://localhost', 'test')
+                second = Environment('http://localhost', 'http://localhost', 'test')
+            with first.exclusive_run():
+                with self.assertRaisesRegex(RuntimeError, 'already running'):
+                    with second.exclusive_run():
+                        pass
+            with second.exclusive_run():
+                pass
+
+    def test_up_alone_does_not_prove_observability(self):
+        """scrape UP만 있고 업무·자원 시계열이 없으면 관측 완료로 판정하지 않는다."""
+        point = {'status': 'success', 'data': {'result': [{'values': [[1, '1']]}]}}
+        complete = {name: point for name in ('up', 'httpCount', 'httpBuckets', 'heap', 'threads', 'hikari')}
+        self.assertTrue(observations_complete(complete, 0))
+        self.assertFalse(observations_complete({'up': point}, 0))
+        self.assertFalse(observations_complete(complete, 1))
+        complete['up'] = {'status': 'success', 'data': {'result': [{'values': [[1, '0']]}]}}
+        self.assertFalse(observations_complete(complete, 0))
+
+    def test_fast_acceptance_does_not_hide_slow_completion(self):
+        """접수는 빨라도 최종 결과가 60초 목표를 넘으면 지연 목표 미달을 보고한다."""
+        db = verification()
+        db['completionSeconds']['p95'] = 83
+        result = evaluate(db=db)
+        self.assertEqual(result['latency'], 'FAIL')
+        self.assertEqual(result['integrity'], 'PASS')
+
+    def test_extra_iterations_fail_even_when_request_counts_match(self):
+        """목표 HTTP 수만 맞고 빈 iteration이 추가된 실험은 유입 조건 실패로 남긴다."""
+        data = summary()
+        data['metrics']['iterations']['values']['count'] = 11
+        self.assertEqual(evaluate(data)['workload'], 'FAIL')
+
     def test_cleanup_accepts_cancel_no_content(self):
         """구매 취소의 정상 204 응답을 실패로 오인하지 않고 실험을 정리한다."""
         with patch.dict('os.environ', {'DATABASE_URL': 'postgresql://test:test@localhost/test'}):

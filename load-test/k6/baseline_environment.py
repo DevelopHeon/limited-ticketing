@@ -1,5 +1,9 @@
 """External connections, resource observations and fixture lifecycle for local experiments."""
 import csv
+import fcntl
+import hashlib
+import tempfile
+from contextlib import contextmanager
 import json
 import os
 import platform
@@ -38,6 +42,24 @@ class Environment:
                            PGDATABASE=parsed.path.strip('/'), PGUSER=urllib.parse.unquote(parsed.username or ''),
                            PGPASSWORD=urllib.parse.unquote(parsed.password or ''), PGCONNECT_TIMEOUT='5')
         self.db_env.pop('DATABASE_URL', None)
+
+    @contextmanager
+    def exclusive_run(self):
+        host = self.db_env['PGHOST']
+        if host in ('localhost', '127.0.0.1', '::1'):
+            host = 'loopback'
+        identity = ':'.join([host, self.db_env['PGPORT'], self.db_env['PGDATABASE']])
+        name = hashlib.sha256(identity.encode()).hexdigest()[:24]
+        path = Path(tempfile.gettempdir()) / f'flash-sale-baseline-{name}.lock'
+        with path.open('a') as stream:
+            try:
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise RuntimeError('Another baseline is already running against this database') from None
+            try:
+                yield
+            finally:
+                fcntl.flock(stream, fcntl.LOCK_UN)
 
     def command(self, args, timeout=20, env=None, input_text=None):
         try:

@@ -91,8 +91,16 @@ def evaluate_results(flow, expected, inventory, summary, verification, observati
             result['integrity'] = 'FAIL'
             result['reasons'].append('Final inventory, purchase or queue relationship mismatch')
     p95 = metric(summary, 'baseline_request_duration', 'p(95)')
-    if p95 is not None:
-        result['latency'] = 'PASS' if p95 < 500 else 'FAIL'
+    p99 = metric(summary, 'baseline_request_duration', 'p(99)')
+    checks = {'httpP95': 'INCOMPLETE' if p95 is None or p99 is None else 'PASS' if p95 < 500 else 'FAIL'}
+    if flow == 'waiting':
+        completion = (verification or {}).get('completionSeconds', {})
+        completed_p95 = completion.get('p95')
+        checks['completionP95'] = ('INCOMPLETE' if completed_p95 is None or completion.get('count') != expected
+                                   else 'PASS' if completed_p95 < 60 else 'FAIL')
+    result['latencyChecks'] = checks
+    result['latency'] = ('INCOMPLETE' if 'INCOMPLETE' in checks.values()
+                         else 'FAIL' if 'FAIL' in checks.values() else 'PASS')
     return result
 
 
@@ -101,3 +109,15 @@ def result_exit_code(verdicts):
     if 'INCOMPLETE' in statuses:
         return 2
     return 1 if 'FAIL' in statuses else 0
+
+
+def observations_complete(observations, sample_errors):
+    required = ('up', 'httpCount', 'httpBuckets', 'heap', 'threads', 'hikari')
+    if sample_errors or any(data.get('status') != 'success' for data in observations.values()):
+        return False
+    for name in required:
+        rows = observations.get(name, {}).get('data', {}).get('result', [])
+        values = [value for row in rows for value in row.get('values', [])]
+        if not values or (name == 'up' and any(float(value[1]) != 1 for value in values)):
+            return False
+    return True

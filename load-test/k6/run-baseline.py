@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run one isolated, observable direct/waiting experiment and retain its evidence."""
 import argparse
+from contextlib import ExitStack
 import json
 import os
 import signal
@@ -12,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from baseline_environment import Environment, ROOT, Sampler
-from baseline_results import RunArtifacts, evaluate_results, result_exit_code, utc_now, write_json
+from baseline_results import RunArtifacts, evaluate_results, result_exit_code, utc_now, write_json, observations_complete
 
 SCENARIOS = {
     'smoke': {'members': 10, 'inventory': 3, 'rate': 5, 'duration': 2, 'preVus': 20, 'maxVus': 100},
@@ -90,7 +91,7 @@ def execute(args):
     output_root = Path(args.output_root).resolve()
     metadata = {'flow': args.flow, 'scenario': args.scenario, 'input': settings,
                 'httpTimeoutSeconds': 10, 'drainDeadlineSeconds': 120}
-    with RunArtifacts(output_root, run_id, metadata) as run:
+    with RunArtifacts(output_root, run_id, metadata) as run, ExitStack() as resources:
         print(f'Run artifacts: {run.path}', flush=True)
         environment = None
         fixture = None
@@ -102,6 +103,7 @@ def execute(args):
         try:
             environment = Environment(args.base_url, os.environ.get('PROMETHEUS_URL', 'http://localhost:9090'),
                                       os.environ.get('COMPOSE_PROJECT_NAME', 'limited-ticketing-baseline'))
+            resources.enter_context(environment.exclusive_run())
             environment.preflight()
             run.manifest['environment'] = environment.metadata()
             write_json(run.path / 'manifest.json', run.manifest)
@@ -145,10 +147,7 @@ def execute(args):
                 summary = json.loads(summary_path.read_text()) if summary_path.exists() else {}
             except ValueError:
                 summary = {}
-            up = observations.get('up', {}).get('data', {}).get('result', [])
-            observed = (bool(up) and all(float(value[1]) == 1 for row in up for value in row.get('values', []))
-                        and all(data.get('status') == 'success' for data in observations.values())
-                        and bool(sampler) and sampler.errors == 0)
+            observed = bool(sampler) and observations_complete(observations, sampler.errors)
             verdicts = evaluate_results(args.flow, settings['members'], settings['inventory'], summary, snapshot, observed)
             if interrupted or process_exit not in (0, 99):
                 verdicts['workload'] = 'INCOMPLETE'

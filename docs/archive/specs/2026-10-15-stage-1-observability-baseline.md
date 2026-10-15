@@ -1,8 +1,8 @@
 # 1단계 스펙 · 관측과 재현 가능한 플래시세일 기준선
 
-상태: **구현·검증 중**. 작성일: 2026-10-15. 기준 코드: `0b723512e2bf5c28ba6c80a7173f4e55d8efa00e`.
+상태: **실행 인수 완료·검토 대기 / 1단계 보관 스펙**. 작성일: 2026-10-15. 기준 코드: `0b723512e2bf5c28ba6c80a7173f4e55d8efa00e`.
 
-전체 제품·학습 범위와 단계 종료 규칙은 [구현 계획](../plans/2026-10-15-flash-sale-implementation-plan.md)을 따른다. 이 문서는 **1단계의 구현 계약과 인수 기준**을 소유한다. 구현·검증 결과는 단계 종료 보고서로 연결한다. 검증이 끝나기 전에는 인수 완료로 표시하지 않는다.
+전체 제품·학습 범위와 단계 종료 규칙은 [구현 계획](../../plans/2026-10-15-flash-sale-implementation-plan.md)을 따른다. 이 문서는 **1단계의 구현 계약과 인수 기준**을 소유한다. 현재 실행 절차는 부하 가이드, 검증 결과와 미달 목표는 1단계 평가가 소유한다. 이 문서는 구현한 1단계 계약의 보관본이다. 측정 revision은 f10edf1, 판정/소유권 보완 revision은 5213635·2049265·6f18fee다.
 
 ## 1. 목적과 범위
 
@@ -16,15 +16,15 @@
 
 | 근거 | 현재 상태 | 이번 단계에 주는 제약 |
 |---|---|---|
-| [구매 Service](../../purchase/src/main/java/com/example/limitedticketing/purchase/application/command/service/PurchaseCommandService.java) | 회원·판매 검사, DB 멱등성, 조건부 재고 예약, 5분 만료 | 유효한 새 회원·판매·키로만 비교 |
-| [대기 Service](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/command/service/ReservationQueueCommandService.java) | DB 커밋 후 Redis 등록 | 202가 최종 예약 성공을 의미하지 않음 |
-| [Worker](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/infrastructure/scheduler/ReservationQueueWorker.java) | 기본 상품별 슬롯 10, claim 10, 주기 100ms, 복구 5초·timeout 30초 | 설정·관측 기간을 manifest에 고정 |
-| [기존 direct 시나리오](../../load-test/k6/sale-open.js) | VU당 1회, 키 발급 setup | 기존 waiting arrival 모델과 그대로 비교하면 유입 조건이 다름 |
-| [기존 waiting 시나리오](../../load-test/k6/waiting-room.js) | iteration 중 키 발급 후 접수, 응답 본문의 실패 check가 threshold와 분리됨 | 새 시나리오는 키 선발급·payload 검증·정확한 실행 건수 확인 |
-| [기존 SQL](../../load-test/k6/sql/verify-waiting-room.sql) | 상태별 수량 출력 | 출력만 보고 사람이 통과 판단하지 않도록 자동 판정 추가 |
-| [보안 설정](../../app/src/main/java/com/example/limitedticketing/configuration/security/SecurityConfig.java) | `/api` 밖 요청은 기본 허용 | Actuator 추가 시 명시적 접근 규칙 필요 |
+| [구매 Service](../../../purchase/src/main/java/com/example/limitedticketing/purchase/application/command/service/PurchaseCommandService.java) | 회원·판매 검사, DB 멱등성, 조건부 재고 예약, 5분 만료 | 유효한 새 회원·판매·키로만 비교 |
+| [대기 Service](../../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/command/service/ReservationQueueCommandService.java) | DB 커밋 후 Redis 등록 | 202가 최종 예약 성공을 의미하지 않음 |
+| [Worker](../../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/infrastructure/scheduler/ReservationQueueWorker.java) | 기본 상품별 슬롯 10, claim 10, 주기 100ms, 복구 5초·timeout 30초 | 설정·관측 기간을 manifest에 고정 |
+| [기존 direct 시나리오](../../../load-test/k6/sale-open.js) | VU당 1회, 키 발급 setup | 기존 waiting arrival 모델과 그대로 비교하면 유입 조건이 다름 |
+| [기존 waiting 시나리오](../../../load-test/k6/waiting-room.js) | iteration 중 키 발급 후 접수, 응답 본문의 실패 check가 threshold와 분리됨 | 새 시나리오는 키 선발급·payload 검증·정확한 실행 건수 확인 |
+| [기존 SQL](../../../load-test/k6/sql/verify-waiting-room.sql) | 상태별 수량 출력 | 출력만 보고 사람이 통과 판단하지 않도록 자동 판정 추가 |
+| [보안 설정](../../../app/src/main/java/com/example/limitedticketing/configuration/security/SecurityConfig.java) | `/api` 밖 요청은 기본 허용 | Actuator 추가 시 명시적 접근 규칙 필요 |
 
-현재 아키텍처·단위/통합 테스트 책임은 [설계](../architecture/README.md), [테스트 기준](../development/testing.md)을 따른다. 이전 성능 JSON은 [기존 평가](../evaluations/load-testing/2026-10-15-existing-results.md)로 유지하고 새 실행과 섞지 않는다.
+현재 아키텍처·단위/통합 테스트 책임은 [설계](../../architecture/README.md), [테스트 기준](../../development/testing.md)을 따른다. 이전 성능 JSON은 [기존 평가](../../evaluations/load-testing/2026-10-15-existing-results.md)로 유지하고 새 실행과 섞지 않는다.
 
 ## 3. 관측 실행 구성과 HTTP 계약
 
@@ -192,3 +192,5 @@ Java 테스트는 한국어 `@DisplayName`으로 업무/접근 규칙을 설명�
 - [Spring Boot Actuator 보안](https://docs.spring.io/spring-boot/3.5/reference/actuator/endpoints.html#actuator.endpoints.security): 사용자 SecurityFilterChain이 있을 때 접근 정책을 직접 구성.
 - [Prometheus scrape 설정](https://prometheus.io/docs/prometheus/latest/configuration/configuration/): scrape interval·HTTP header 지원. 실제 고정 버전의 지원 여부를 구현 시 확인.
 - [k6 arrival-rate](https://grafana.com/docs/k6/latest/using-k6/scenarios/executors/constant-arrival-rate/): iteration 시작률과 VU의 구분.
+
+현재 문서: [실행 가이드](../../performance/load-testing.md), [평가 결과](../../evaluations/load-testing/2026-10-15-stage-1-baseline.md), [진행 상태](../../plans/roadmap.md).

@@ -10,17 +10,29 @@ flowchart LR
         subgraph docker["Docker Compose"]
             pg["postgres 서비스<br/>postgres:17-alpine · 내부 5432"]
             redis["redis 서비스<br/>redis:7-alpine · 내부 6379"]
+            subgraph observability["선택: observability profile"]
+                prometheus["Prometheus · 9090"]
+                grafana["Grafana · 3000"]
+                grafana -->|"시계열 조회"| prometheus
+            end
             volume[("postgres-data<br/>PostgreSQL 영속 볼륨")]
             pg -->|"데이터 저장"| volume
         end
+        prometheus -->|"관리자 header로 지표 scrape"| app
         client -->|"HTTP · localhost:8081"| app
         app -->|"JDBC · localhost:5432 → 5432"| pg
         app -->|"Redis · localhost:6379 → 6379"| redis
     end
 ```
 
-[Deployment](https://c4model.com/diagrams/deployment)는 특정 환경에서 Container를 실행하는 위치와 연결을 보여 준다. 현재 [compose.yaml](../../compose.yaml)에는 PostgreSQL·Redis만 있으며 애플리케이션은 호스트 JVM에서 실행한다. 따라서 전체가 Docker나 Pod 하나에 배포된 것으로 설명하지 않는다.
+[Deployment](https://c4model.com/diagrams/deployment)는 특정 환경에서 Container를 실행하는 위치와 연결을 보여 준다. 현재 [compose.yaml](../../compose.yaml)의 기본 서비스는 PostgreSQL·Redis이며 관측 서비스는 선택 profile로 실행한다. 애플리케이션은 호스트 JVM에서 실행한다. 따라서 전체가 Docker나 Pod 하나에 배포된 것으로 설명하지 않는다.
 
 PostgreSQL은 named volume을 사용한다. Redis에는 영속 볼륨·AOF·복제가 설정되어 있지 않아 컨테이너 재생성 후 순번과 ZSET이 유실될 수 있다. DB 상태 복원과 순서 보존의 한계는 [구매 대기 복구 정책](purchase-waiting.md#redis-유실-시의-한계)을 따른다.
 
 호스트 공개 포트는 [.env.example](../../.env.example)의 `POSTGRES_PORT`, `REDIS_PORT`로 바꿀 수 있다. 호스트에서 실행하는 앱의 DB·Redis 연결 값도 [application.yml](../../app/src/main/resources/application.yml)에 맞춰 설정해야 한다. Compose용 `.env`를 수정하는 것만으로 호스트 JVM의 환경 변수가 자동 설정되지는 않는다.
+
+## 관측·측정 전용 구성
+
+`observability` profile은 Prometheus v3.15.0과 Grafana 13.2.4를 추가한다. 관측 UI는 localhost에 공개하며 지표는 관리자 header로 scrape한다. `APP_METRICS_TARGET`으로 호스트 앱 주소를 지정한다. Grafana datasource·대시보드는 소스에서 자동 provisioning하고 데이터 볼륨을 유지한다.
+
+1단계 실험은 기본 실행과 별도의 Compose project `limited-ticketing-baseline`과 앱 18081·DB 15432·Redis 16379를 사용했다. `compose.baseline.yaml`이 DB/Redis 자원 제한을 추가하며 앱 JVM은 호스트에서 256~768MB로 실행했다. [실행 절차](../performance/load-testing.md#전용-로컬-환경-준비)와 [실제 측정 조건](../evaluations/load-testing/2026-10-15-stage-1-baseline.md#환경과-방법)을 따른다. 기본 포트 그림을 실험 포트와 같은 것으로 해석하지 않는다.

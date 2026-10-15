@@ -20,6 +20,7 @@
 | `PurchaseReservationIntegrationTest` | 구매 예약·취소·만료, 소유권과 재고 반환 검증 |
 | `PaymentLifecycleIntegrationTest` | 결제 실패·재시도·승인, 소유권·만료와 구매 및 재고 전이 검증 |
 | `SaleProductManagementIntegrationTest` | 판매 생성, 상태 전이, 재고 생성, 목록/상세 조회 검증 |
+| `ObservabilityIntegrationTest` | 실제 HTTP의 지표 접근 401/403/200, 업무 API 인증 유지, histogram·JVM·Hikari 노출 검증 |
 | `ReservationQueueIntegrationTest` | Redis ZSET과 PostgreSQL에서 대기열 멱등성, 중복 차단, 예약/품절, 복구 검증 |
 
 `ModularityDocumentationTests`는 Spring Modulith `Documenter`로 코드 기준의 모듈 문서를 생성한다.
@@ -39,3 +40,14 @@ Domain 및 Application Service 단위 테스트는 각 업무 모듈이 소유�
 새 모듈, Named Interface, 모듈 간 의존성을 변경할 때는 `./gradlew check`를 실행해 코드 규칙, 아키텍처, 업무 동작과 모듈 문서 생성을 함께 검증한다. `./gradlew test`는 Checkstyle을 실행하지 않는다. 부하 테스트 절차는 [부하 테스트 가이드](../performance/load-testing.md), 남은 검증과 확장 계획은 [로드맵](../plans/roadmap.md)에서 관리한다.
 
 테스트만 실행하려면 `./gradlew test`를 사용한다. 테스트 클래스와 메서드의 `@DisplayName`은 검증하는 업무 규칙을 한국어로 설명한다.
+
+## 부하 평가 도구의 계약 검사
+
+Python unittest는 원본 덮어쓰기·불완전 결과·재고/구매 연결·DB 동시 실행·정리 소유권·지연 판정을, Node test는 실제 k6가 사용하는 응답 분류와 fixture 중복을 검사한다. 테스트는 한국어 설명을 제공한다. 실제 DB/Redis/HTTP/k6 연결은 Smoke와 최종 SQL 검증으로 확인한다.
+
+```bash
+python3 -m unittest discover -s load-test/k6 -p test_run_baseline.py
+node --test load-test/k6/baseline-contract.test.mjs
+```
+
+전체 Java 규칙·아키텍처·업무 테스트는 기존처럼 `./gradlew check`로 실행한다.

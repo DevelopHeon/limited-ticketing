@@ -8,9 +8,9 @@
 
 **기술:** Java 17, Spring Boot 3.5.16, Spring Modulith 1.4.12, PostgreSQL 17, Redis 7, Kafka, k6, Micrometer·Prometheus·Grafana. 새 제품의 patch 버전과 image digest는 해당 단계 시작 시 확인해 고정하고 실행 manifest에 기록한다.
 
-**1단계 스펙:** [관측과 재현 가능한 기준선](../specs/2026-10-15-stage-1-observability-baseline.md). 이후 단계는 시작 요청 후 직전 결과를 검토하고 해당 단계 스펙을 확정한다.
+**1단계 스펙:** [관측과 재현 가능한 기준선](../archive/specs/2026-10-15-stage-1-observability-baseline.md). 이후 단계는 시작 요청 후 직전 결과를 검토하고 해당 단계 스펙을 확정한다.
 
-작성일: 2026-10-15. 기준 revision: `0b723512e2bf5c28ba6c80a7173f4e55d8efa00e`. **사용자의 1단계 시작 요청에 따라 1단계 구현·검증 중이다.** 현재 계약은 [아키텍처](../architecture/README.md), 진행 상태는 [로드맵](roadmap.md)이 소유한다.
+작성일: 2026-10-15. 기준 revision: `0b723512e2bf5c28ba6c80a7173f4e55d8efa00e`. **1단계 실행 인수 완료·검토 대기다. [결과](../evaluations/load-testing/2026-10-15-stage-1-baseline.md)를 검토하고 2단계는 별도 시작 요청 뒤 진행한다.** 현재 계약은 [아키텍처](../architecture/README.md), 진행 상태는 [로드맵](roadmap.md)이 소유한다.
 
 ## 1. 확정한 제품 범위와 학습 목표
 
@@ -129,7 +129,7 @@ flowchart TD
 
 ## 7. 1단계 실행 작업
 
-1단계의 값·계약·인수 기준은 [스펙](../specs/2026-10-15-stage-1-observability-baseline.md)이 소유한다. 아래 예정 경로는 아직 생성되지 않은 파일을 포함한다. 구현 시 기존 파일 변화가 있으면 스펙과 함께 조정한다.
+1단계의 값·계약·인수 기준은 [스펙](../archive/specs/2026-10-15-stage-1-observability-baseline.md)이 소유한다. 아래는 완료한 1단계 작업 기록이다. 스펙은 보관 위치로 이동했으며 현재 실행 절차와 결과는 가이드/평가 문서를 따른다.
 
 ### 공통 제약
 
@@ -156,15 +156,15 @@ flowchart TD
 
 **계약:** 기존 `local/test` 관리자 인증으로 `/actuator/prometheus`를 읽는다. `observability` Compose profile이 호스트 앱을 scrape한다. 상세 설정은 스펙 §3을 따른다.
 
-- [ ] 지표 접근 제어·요청 계측을 검증하는 통합 테스트를 먼저 작성한다. 정확성 실패 요청도 HTTP 결과로 계측하고 회원별 label은 만들지 않는다.
-- [ ] 다음 테스트가 의도한 이유로 실패하는지 확인한다.
+- [x] 지표 접근 제어·요청 계측을 검증하는 통합 테스트를 먼저 작성한다. 정확성 실패 요청도 HTTP 결과로 계측하고 회원별 label은 만들지 않는다.
+- [x] 다음 테스트가 의도한 이유로 실패하는지 확인한다.
 
 ```bash
 ./gradlew :app:test --tests '*ObservabilityIntegrationTest'
 ```
 
-- [ ] Actuator·Prometheus registry와 접근 정책, Compose profile과 자동 provisioning을 구현한다.
-- [ ] 같은 테스트를 통과시키고 Compose profile 기동·scrape UP·대시보드 데이터 표시를 확인한다. 관측 구성 유무에 따른 Smoke의 업무 결과가 같아야 한다.
+- [x] Actuator·Prometheus registry와 접근 정책, Compose profile과 자동 provisioning을 구현한다.
+- [x] 같은 테스트를 통과시키고 Compose profile 기동·scrape UP·대시보드 데이터 표시를 확인한다. 관측 구성 유무에 따른 Smoke의 업무 결과가 같아야 한다.
 
 ### Task 1.2 · 같은 유입 모델의 직접/대기 평가 도구
 
@@ -176,10 +176,10 @@ flowchart TD
 
 **입출력:** `run-baseline.py --flow {direct,waiting} --scenario {smoke,baseline,observe-5000} --base-url URL --output-root PATH` → 고유 run 디렉터리의 manifest·fixture·summary·검증·샘플·원본. Python 3 표준 라이브러리로 `psql`, `k6`, Docker CLI를 인자 배열로 호출하고 셸 문자열 보간을 사용하지 않는다.
 
-- [ ] 실제 k6가 사용하는 응답 분류를 Node `node:test`로 검증하고, 표준 라이브러리 `unittest`로 `test_existing_run_is_not_overwritten`, `test_unexpected_responses_fail_workload`, `test_dropped_iterations_fail_workload`, `test_quantity_mismatch_fails_integrity`, `test_timeout_preserves_partial_artifacts`를 작성해 각각 재실행 덮어쓰기 방지, 품절 외 409 분류, drop, SQL 수량 불일치, timeout 결과 보존을 검증한다. Python 테스트는 한국어 설명 docstring, Node 테스트는 한국어 테스트 이름을 둔다.
-- [ ] `python3 -m unittest discover -s load-test/k6 -p test_run_baseline.py`로 테스트가 의도한 이유로 실패하는지 확인하고 fixture·검증 SQL·k6 시나리오·실행 조율을 구현한다. 외부 프로세스 호출은 대체해 실패 분기를 검증하고 실제 Smoke로 연결을 확인한다.
-- [ ] 같은 유입 모델·초기 수량·Worker 설정을 사용하는 direct/waiting Smoke를 각각 실행한다. 키 발급은 측정 전 완료하고 다른 fixture로 warmup한다.
-- [ ] 의도적으로 잘못된 기대 재고와 불완전 summary를 입력했을 때 도구가 실패를 보고하고 원본을 남기는지 확인한다. 무의미한 DTO/설정 접근자 테스트는 만들지 않는다.
+- [x] 실제 k6가 사용하는 응답 분류를 Node `node:test`로 검증하고, 표준 라이브러리 `unittest`로 `test_existing_run_is_not_overwritten`, `test_unexpected_responses_fail_workload`, `test_dropped_iterations_fail_workload`, `test_quantity_mismatch_fails_integrity`, `test_timeout_preserves_partial_artifacts`를 작성해 각각 재실행 덮어쓰기 방지, 품절 외 409 분류, drop, SQL 수량 불일치, timeout 결과 보존을 검증한다. Python 테스트는 한국어 설명 docstring, Node 테스트는 한국어 테스트 이름을 둔다.
+- [x] `python3 -m unittest discover -s load-test/k6 -p test_run_baseline.py`로 테스트가 의도한 이유로 실패하는지 확인하고 fixture·검증 SQL·k6 시나리오·실행 조율을 구현한다. 외부 프로세스 호출은 대체해 실패 분기를 검증하고 실제 Smoke로 연결을 확인한다.
+- [x] 같은 유입 모델·초기 수량·Worker 설정을 사용하는 direct/waiting Smoke를 각각 실행한다. 키 발급은 측정 전 완료하고 다른 fixture로 warmup한다.
+- [x] 의도적으로 잘못된 기대 재고와 불완전 summary를 입력했을 때 도구가 실패를 보고하고 원본을 남기는지 확인한다. 무의미한 DTO/설정 접근자 테스트는 만들지 않는다.
 
 ### Task 1.3 · 기준선 기록과 단계 종료
 
@@ -189,11 +189,11 @@ flowchart TD
 
 **평가 생성:** `docs/evaluations/load-testing/<실제 정리일>-stage-1-baseline.md`. raw artifact는 Git 제외 경로에 보존하고 hash·보존 위치를 연결한다.
 
-- [ ] `./gradlew check`와 Python 테스트를 통과시킨다.
-- [ ] fresh fixture로 baseline을 direct/waiting 각각 3회, observe-5000을 각각 1회 실행한다. 장비가 부족하면 관측 실패·자원 상한을 기록하고 5,000명 달성을 주장하지 않는다.
-- [ ] HTTP 지연·최종 업무 결과·대기 완료 시간·DB 락·연결 대기·JVM·관측 overhead를 해석한다. 서로 다른 실험의 percentile을 합쳐 하나의 percentile로 만들지 않는다.
-- [ ] 1단계 인수 기준과 알려진 한계, 2단계 논의 사항을 보고서와 로드맵에 반영한다.
-- [ ] 한국어 commit/push 후 원격 반영을 확인하고 **검토 대기에서 종료**한다.
+- [x] `./gradlew check`와 Python 테스트를 통과시킨다.
+- [x] fresh fixture로 baseline을 direct/waiting 각각 3회, observe-5000을 각각 1회 실행한다. 장비가 부족하면 관측 실패·자원 상한을 기록하고 5,000명 달성을 주장하지 않는다.
+- [x] HTTP 지연·최종 업무 결과·대기 완료 시간·DB 락·연결 대기·JVM·관측 overhead를 해석한다. 서로 다른 실험의 percentile을 합쳐 하나의 percentile로 만들지 않는다.
+- [x] 1단계 인수 기준과 알려진 한계, 2단계 논의 사항을 보고서와 로드맵에 반영한다.
+- [x] 한국어 commit/push 후 원격 반영을 확인하고 **검토 대기에서 종료**한다.
 
 ### 실행 중 확인한 조정
 

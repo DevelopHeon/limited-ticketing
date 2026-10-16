@@ -17,6 +17,14 @@ public class ReservationQueueRedisKeys {
         return PROCESSING_PREFIX + saleProductId;
     }
 
+    public String tokens(Long saleProductId) {
+        return "processing-tokens:sale:" + saleProductId;
+    }
+
+    public String tokensPattern() {
+        return "processing-tokens:sale:*";
+    }
+
     public String sequence(Long saleProductId) {
         return SEQUENCE_PREFIX + saleProductId;
     }

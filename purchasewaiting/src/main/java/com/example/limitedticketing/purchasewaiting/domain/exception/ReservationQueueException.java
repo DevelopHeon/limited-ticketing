@@ -9,6 +9,21 @@ public final class ReservationQueueException extends DomainException {
         super(errorType, code, message);
     }
 
+    public static ReservationQueueException capacityExceeded() {
+        return new ReservationQueueException(DomainErrorType.TOO_MANY_REQUESTS,
+            "QUEUE_CAPACITY_EXCEEDED", "Queue capacity is exhausted");
+    }
+
+    public static ReservationQueueException rateLimited() {
+        return new ReservationQueueException(DomainErrorType.TOO_MANY_REQUESTS,
+            "QUEUE_RATE_LIMITED", "Only one new entry per member and sale is allowed each second");
+    }
+
+    public static ReservationQueueException unavailable() {
+        return new ReservationQueueException(DomainErrorType.SERVICE_UNAVAILABLE,
+            "QUEUE_UNAVAILABLE", "Queue admission is temporarily unavailable");
+    }
+
     public static ReservationQueueException notFound() {
         return new ReservationQueueException(DomainErrorType.NOT_FOUND, "QUEUE_ENTRY_NOT_FOUND", "Queue entry not found");
     }

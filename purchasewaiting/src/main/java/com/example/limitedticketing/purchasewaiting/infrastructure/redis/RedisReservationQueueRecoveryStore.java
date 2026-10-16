@@ -1,7 +1,6 @@
 package com.example.limitedticketing.purchasewaiting.infrastructure.redis;
 
 import com.example.limitedticketing.purchasewaiting.application.port.out.ReservationQueueRecoveryStore;
-import java.time.Instant;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
@@ -27,20 +26,12 @@ public class RedisReservationQueueRecoveryStore implements ReservationQueueRecov
     }
 
     @Override
-    public void removeProcessingOlderThan(Long saleProductId, Instant threshold) {
-        stringRedisTemplate.opsForZSet().removeRangeByScore(
-            keys.processing(saleProductId),
-            Double.NEGATIVE_INFINITY,
-            threshold.toEpochMilli()
-        );
-    }
-
-    @Override
     public Set<Long> findSaleProductIds() {
         Set<Long> saleProductIds = new HashSet<>();
         collectSaleProductIds(keys.waitingPattern(), saleProductIds);
         collectSaleProductIds(keys.processingPattern(), saleProductIds);
         collectSaleProductIds(keys.sequencePattern(), saleProductIds);
+        collectSaleProductIds(keys.tokensPattern(), saleProductIds);
         return saleProductIds;
     }
 
@@ -62,6 +53,10 @@ public class RedisReservationQueueRecoveryStore implements ReservationQueueRecov
     @Override
     public void removeProcessing(Long saleProductId, Collection<UUID> queueEntryIds) {
         remove(keys.processing(saleProductId), queueEntryIds);
+        if (!queueEntryIds.isEmpty()) {
+            stringRedisTemplate.opsForHash().delete(keys.tokens(saleProductId),
+                queueEntryIds.stream().map(UUID::toString).toArray(Object[]::new));
+        }
     }
 
     @Override
@@ -69,7 +64,8 @@ public class RedisReservationQueueRecoveryStore implements ReservationQueueRecov
         stringRedisTemplate.delete(List.of(
             keys.waiting(saleProductId),
             keys.processing(saleProductId),
-            keys.sequence(saleProductId)
+            keys.sequence(saleProductId),
+            keys.tokens(saleProductId)
         ));
     }
 

@@ -18,7 +18,7 @@
 |---|---|---|
 | [구매 Service](../../../purchase/src/main/java/com/example/limitedticketing/purchase/application/command/service/PurchaseCommandService.java) | 회원·판매 검사, DB 멱등성, 조건부 재고 예약, 5분 만료 | 유효한 새 회원·판매·키로만 비교 |
 | [대기 Service](../../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/command/service/ReservationQueueCommandService.java) | DB 커밋 후 Redis 등록 | 202가 최종 예약 성공을 의미하지 않음 |
-| [Worker](../../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/infrastructure/scheduler/ReservationQueueWorker.java) | 기본 상품별 슬롯 10, claim 10, 주기 100ms, 복구 5초·timeout 30초 | 설정·관측 기간을 manifest에 고정 |
+| [Worker](https://github.com/DevelopHeon/limited-ticketing/blob/e6e5287a7767880b808820c54ed11636d17da2e1/purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/infrastructure/scheduler/ReservationQueueWorker.java) | 기본 상품별 슬롯 10, claim 10, 주기 100ms, 복구 5초·timeout 30초 | 설정·관측 기간을 manifest에 고정 |
 | [기존 direct 시나리오](../../../load-test/k6/sale-open.js) | VU당 1회, 키 발급 setup | 기존 waiting arrival 모델과 그대로 비교하면 유입 조건이 다름 |
 | [기존 waiting 시나리오](../../../load-test/k6/waiting-room.js) | iteration 중 키 발급 후 접수, 응답 본문의 실패 check가 threshold와 분리됨 | 새 시나리오는 키 선발급·payload 검증·정확한 실행 건수 확인 |
 | [기존 SQL](../../../load-test/k6/sql/verify-waiting-room.sql) | 상태별 수량 출력 | 출력만 보고 사람이 통과 판단하지 않도록 자동 판정 추가 |

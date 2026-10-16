@@ -4,6 +4,7 @@ dependencies {
     implementation project(':sale')
     implementation project(':purchase')
 
+    compileOnly rootProject.libraries.bootActuator
     compileOnly rootProject.libraries.bootDataRedis
     compileOnly rootProject.libraries.bootSecurity
     compileOnly rootProject.libraries.bootWeb

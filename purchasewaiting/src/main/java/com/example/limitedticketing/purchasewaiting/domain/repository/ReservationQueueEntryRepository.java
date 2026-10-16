@@ -10,6 +10,18 @@ import java.util.UUID;
 
 public interface ReservationQueueEntryRepository {
 
+    void lockQueue(Long saleProductId);
+
+    long countActive(Long saleProductId);
+
+    long countProcessing(Long saleProductId);
+
+    Optional<ReservationQueueEntry> claim(UUID queueEntryId, UUID token, LocalDateTime now, LocalDateTime leaseUntil);
+
+    Optional<ReservationQueueEntry> findByIdForUpdate(UUID queueEntryId);
+
+    Optional<ReservationQueueEntry> findByIdForUpdateSkipLocked(UUID queueEntryId);
+
     ReservationQueueEntry save(ReservationQueueEntry entry);
 
     IdempotentReservationQueueEntry saveIfAbsent(ReservationQueueEntry entry);
@@ -20,11 +32,11 @@ public interface ReservationQueueEntryRepository {
 
     List<Long> findSaleProductIdsWithWaitingEntries();
 
-    List<ReservationQueueEntry> findWaitingEntriesAfter(Long saleProductId, long queueSequence, int limit);
+    List<ReservationQueueEntry> findWaitingEntriesAfter(Long saleProductId, long queueSequence, UUID queueEntryId, int limit);
 
-    List<ReservationQueueEntry> findProcessingEntriesStartedBefore(LocalDateTime threshold, int limit);
+    List<ReservationQueueEntry> findExpiredProcessingEntries(LocalDateTime threshold, int limit);
 
-    Set<UUID> findExistingIds(Collection<UUID> queueEntryIds);
+    Set<UUID> findActiveIds(Collection<UUID> queueEntryIds);
 
     boolean existsActiveEntry(Long saleProductId);
 }

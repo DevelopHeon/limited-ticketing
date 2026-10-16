@@ -1,12 +1,14 @@
 package com.example.limitedticketing.architecture;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
 
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -17,6 +19,16 @@ class LayeringArchitectureTests {
     private static final JavaClasses classes = new ClassFileImporter()
         .withImportOption(new ImportOption.DoNotIncludeTests())
         .importPackages("com.example.limitedticketing");
+
+    @Test
+    @DisplayName("스케줄 실행 트리거는 표현 계층에 선언하고 입력 계약을 통해 업무를 호출한다")
+    void scheduledTriggersBelongToPresentation() {
+        methods()
+            .that().areAnnotatedWith(Scheduled.class)
+            .should().beDeclaredInClassesThat().resideInAPackage("..presentation..")
+            .because("Schedulers are inbound adapters; application services own business orchestration")
+            .check(classes);
+    }
 
     @Test
     @DisplayName("실행 모듈의 HTTP 어댑터도 공개 애플리케이션 계약을 통해 업무를 호출한다")

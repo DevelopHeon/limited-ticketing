@@ -44,7 +44,7 @@ import static org.assertj.core.api.InstanceOfAssertFactories.LONG;
 @Testcontainers
 @SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("test")
+@ActiveProfiles({"test", "baseline"})
 @DisplayName("구매 예약의 동시성과 멱등성 통합 검증")
 class PurchaseConcurrencyIntegrationTest {
 

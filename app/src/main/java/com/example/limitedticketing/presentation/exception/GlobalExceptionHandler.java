@@ -8,6 +8,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -25,8 +27,11 @@ public class GlobalExceptionHandler {
         HttpStatus status = httpStatusOf(exception.getErrorType());
         log.warn("Domain exception [{}]: {}", exception.getCode(), exception.getMessage());
 
-        return ResponseEntity.status(status)
-            .body(new ApiErrorResponse(
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(status);
+        if (status == HttpStatus.TOO_MANY_REQUESTS || status == HttpStatus.SERVICE_UNAVAILABLE) {
+            response.header(HttpHeaders.RETRY_AFTER, "1");
+        }
+        return response.body(new ApiErrorResponse(
                 Instant.now(),
                 status.value(),
                 exception.getCode(),
@@ -58,8 +63,19 @@ public class GlobalExceptionHandler {
             case NOT_FOUND -> HttpStatus.NOT_FOUND;
             case CONFLICT -> HttpStatus.CONFLICT;
             case FORBIDDEN -> HttpStatus.FORBIDDEN;
+            case TOO_MANY_REQUESTS -> HttpStatus.TOO_MANY_REQUESTS;
+            case SERVICE_UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
             case INTERNAL_ERROR -> HttpStatus.INTERNAL_SERVER_ERROR;
         };
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleMissingResource(
+        NoResourceFoundException exception,
+        HttpServletRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ApiErrorResponse(
+            Instant.now(), HttpStatus.NOT_FOUND.value(), "RESOURCE_NOT_FOUND", "Resource not found", request.getRequestURI()));
     }
 
     @ExceptionHandler(Exception.class)

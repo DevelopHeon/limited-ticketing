@@ -49,6 +49,12 @@ public class ReservationQueueEntryJpaEntity {
     @Column(name = "completed_at")
     private LocalDateTime completedAt;
 
+    @Column(name = "processing_token")
+    private UUID processingToken;
+
+    @Column(name = "lease_until")
+    private LocalDateTime leaseUntil;
+
     protected ReservationQueueEntryJpaEntity() {
     }
 
@@ -64,6 +70,8 @@ public class ReservationQueueEntryJpaEntity {
         this.createdAt = entry.getCreatedAt();
         this.processingStartedAt = entry.getProcessingStartedAt();
         this.completedAt = entry.getCompletedAt();
+        this.processingToken = entry.getProcessingToken();
+        this.leaseUntil = entry.getLeaseUntil();
     }
 
     public static ReservationQueueEntryJpaEntity from(ReservationQueueEntry entry) {
@@ -82,7 +90,9 @@ public class ReservationQueueEntryJpaEntity {
             failureCode,
             createdAt,
             processingStartedAt,
-            completedAt
+            completedAt,
+            processingToken,
+            leaseUntil
         );
     }
 }

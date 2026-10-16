@@ -26,9 +26,9 @@ flowchart TB
     subgraph system["Limited Ticketing 시스템"]
         app["Spring Boot / Java 17<br/>HTTP API · 스케줄러<br/>비동기 구매 Worker"]
         db[("PostgreSQL 17<br/>회원·판매·재고<br/>구매·결제·대기 상태")]
-        redis[("Redis 7<br/>대기 순번<br/>waiting / processing ZSET")]
+        redis[("Redis 7<br/>대기 위치·시도 토큰<br/>waiting / processing ZSET")]
         app -->|"JDBC · 업무 상태 조회와 트랜잭션"| db
-        app -->|"Redis 명령·Lua · 순번 발급과 처리 슬롯 claim"| redis
+        app -->|"Redis 명령·Lua · 대기 선택과 처리 슬롯 claim"| redis
     end
     member -->|"HTTP / JSON"| app
     admin -->|"HTTP / JSON"| app

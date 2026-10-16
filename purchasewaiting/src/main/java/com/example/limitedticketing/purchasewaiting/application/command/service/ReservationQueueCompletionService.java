@@ -7,6 +7,7 @@ import com.example.limitedticketing.purchasewaiting.domain.repository.Reservatio
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.UUID;
+import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,10 +28,11 @@ class ReservationQueueCompletionService {
         this.clock = clock;
     }
 
-    @Transactional(readOnly = true)
-    public ReservePurchaseInput getReservationInput(UUID queueEntryId) {
-        ReservationQueueEntry entry = reservationQueueEntryFinder.getRequired(queueEntryId);
-        return new ReservePurchaseInput(entry.getMemberId(), entry.getSaleProductId(), entry.getPurchaseRequestKey());
+    @Transactional
+    public Optional<ReservePurchaseInput> getReservationInput(UUID id, UUID token) {
+        return reservationQueueEntryRepository.findByIdForUpdate(id)
+            .filter(entry -> entry.ownsAttempt(token) && entry.getLeaseUntil().isAfter(LocalDateTime.now(clock)))
+            .map(entry -> new ReservePurchaseInput(entry.getMemberId(), entry.getSaleProductId(), entry.getPurchaseRequestKey()));
     }
 
     @Transactional

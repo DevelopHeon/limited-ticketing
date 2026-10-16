@@ -87,7 +87,7 @@ package com.example.limitedticketing.member.application.port.in;
 
 다른 모듈을 호출할 때는 대상 모듈의 `application.port.in` Facade와 `application.port.in.dto`만 참조한다. 대상 모듈의 Domain 모델, JPA Entity, Spring Data Repository, 내부 Command/Query Service는 직접 참조하지 않는다.
 
-현재 Scheduler는 infrastructure에 있으며, 입력·출력 어댑터를 역할별로 배치하는 [ADR 0005](../adr/0005-inbound-outbound-adapters.md)를 2단계부터 적용한다. 아래 구조는 현재 구현 기준이다.
+Scheduler는 presentation에서 내부 입력 Facade를 호출한다. 입력·출력의 배치 기준은 [ADR 0005](../adr/0005-inbound-outbound-adapters.md)를 따른다. 아래 구조는 현재 구현 기준이다.
 
 ## 레이어 구조
 
@@ -135,7 +135,7 @@ purchase
 | `application.port.in` | 모듈 외부 진입점, 공개 DTO와 내부 DTO 변환 | 내부 Application Service |
 | `application.port.out` | DB 외 기술에 대한 요구 계약 | 기술 중립 인터페이스만 선언 |
 | `domain` | 상태 전이, 불변식, 도메인 예외, Repository 추상화 | Java와 `shared`의 의미 있는 값 타입 |
-| `infrastructure` | JPA, Spring Data, Redis, Spring Event, Scheduler 구현 | Domain Repository 및 `port.out` 구현 |
+| `infrastructure` | JPA, Spring Data, Redis, Spring Event, Executor 구현 | Domain Repository 및 `port.out` 구현 |
 
 Domain에는 Spring, JPA, Hibernate 어노테이션을 두지 않는다. JPA 매핑은 `infrastructure.persistence.entity`의 `*JpaEntity`가 소유하고, `*RepositoryAdapter`가 JPA Entity와 Domain 모델을 변환하면서 Domain Repository를 구현한다.
 
@@ -241,7 +241,7 @@ Aggregate 상태 변경
 
 `purchasewaiting`은 구매 대기 접수, 순번, 처리 결과와 복구를 소유한다. Worker는 `purchase`의 공개 Facade로 실제 구매 예약을 실행하며, 구매와 재고의 최종 정합성은 PostgreSQL 트랜잭션이 보호한다.
 
-Redis ZSET은 대기 순서와 처리 슬롯을 제공한다. API 계약, DB 상태, Redis 키와 장애 복구 절차는 [구매 대기 설계](purchase-waiting.md)를 따른다. 직접 예약 API는 대기열을 거치지 않는 기준선 측정 경로로 유지한다.
+Redis ZSET은 대기 순서와 처리 슬롯을 제공한다. API 계약, DB 상태, Redis 키와 장애 복구 절차는 [구매 대기 설계](purchase-waiting.md)를 따른다. 직접 예약 HTTP는 `baseline` profile에서만 기준선 측정 경로로 제공한다.
 
 ## 검증과 관련 문서
 

@@ -17,6 +17,8 @@ public class ReservationQueueEntry {
     private final LocalDateTime createdAt;
     private LocalDateTime processingStartedAt;
     private LocalDateTime completedAt;
+    private UUID processingToken;
+    private LocalDateTime leaseUntil;
 
     private ReservationQueueEntry(
         UUID id,
@@ -29,10 +31,13 @@ public class ReservationQueueEntry {
         String failureCode,
         LocalDateTime createdAt,
         LocalDateTime processingStartedAt,
-        LocalDateTime completedAt
+        LocalDateTime completedAt,
+        UUID processingToken,
+        LocalDateTime leaseUntil
     ) {
         if (id == null || memberId == null || saleProductId == null || purchaseRequestKey == null
-            || purchaseRequestKey.isBlank() || queueSequence <= 0 || status == null || createdAt == null) {
+            || purchaseRequestKey.isBlank() || queueSequence <= 0 || queueSequence > 9_007_199_254_740_991L
+            || status == null || createdAt == null) {
             throw ReservationQueueException.invalid("Queue entry fields are required");
         }
 
@@ -47,6 +52,8 @@ public class ReservationQueueEntry {
         this.createdAt = createdAt;
         this.processingStartedAt = processingStartedAt;
         this.completedAt = completedAt;
+        this.processingToken = processingToken;
+        this.leaseUntil = leaseUntil;
     }
 
     public static ReservationQueueEntry enqueue(
@@ -68,6 +75,8 @@ public class ReservationQueueEntry {
             null,
             createdAt,
             null,
+            null,
+            null,
             null
         );
     }
@@ -83,7 +92,9 @@ public class ReservationQueueEntry {
         String failureCode,
         LocalDateTime createdAt,
         LocalDateTime processingStartedAt,
-        LocalDateTime completedAt
+        LocalDateTime completedAt,
+        UUID processingToken,
+        LocalDateTime leaseUntil
     ) {
         return new ReservationQueueEntry(
             id,
@@ -96,17 +107,22 @@ public class ReservationQueueEntry {
             failureCode,
             createdAt,
             processingStartedAt,
-            completedAt
+            completedAt,
+            processingToken,
+            leaseUntil
         );
     }
 
-    public void beginProcessing(LocalDateTime now) {
-        if (status != ReservationQueueStatus.WAITING) {
+    public void beginProcessing(UUID token, LocalDateTime now, LocalDateTime leaseUntil) {
+        if (status != ReservationQueueStatus.WAITING || token == null || now == null
+            || leaseUntil == null || !leaseUntil.isAfter(now)) {
             throw ReservationQueueException.invalidState("Only waiting queue entries can begin processing");
         }
 
         status = ReservationQueueStatus.PROCESSING;
         processingStartedAt = now;
+        processingToken = token;
+        this.leaseUntil = leaseUntil;
     }
 
     public void completeReservation(Long purchaseId, LocalDateTime now) {
@@ -134,6 +150,8 @@ public class ReservationQueueEntry {
 
         status = ReservationQueueStatus.WAITING;
         processingStartedAt = null;
+        processingToken = null;
+        leaseUntil = null;
     }
 
     private void complete(ReservationQueueStatus completedStatus, String failureCode, LocalDateTime now) {
@@ -144,6 +162,18 @@ public class ReservationQueueEntry {
         status = completedStatus;
         this.failureCode = failureCode;
         completedAt = now;
+    }
+
+    public boolean ownsAttempt(UUID token) {
+        return status == ReservationQueueStatus.PROCESSING && token != null && token.equals(processingToken);
+    }
+
+    public UUID getProcessingToken() {
+        return processingToken;
+    }
+
+    public LocalDateTime getLeaseUntil() {
+        return leaseUntil;
     }
 
     public UUID getId() {

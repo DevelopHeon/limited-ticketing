@@ -1,13 +1,10 @@
 package com.example.limitedticketing.purchasewaiting.application.port.out;
 
-import java.time.Instant;
 import java.util.Collection;
 import java.util.Set;
 import java.util.UUID;
 
 public interface ReservationQueueRecoveryStore {
-
-    void removeProcessingOlderThan(Long saleProductId, Instant threshold);
 
     Set<Long> findSaleProductIds();
 

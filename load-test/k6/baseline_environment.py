@@ -19,6 +19,7 @@ from baseline_results import utc_now
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKER_DEFAULTS = {
+    'QUEUE_MAX_OUTSTANDING': '10000', 'QUEUE_GLOBAL_CONCURRENT_PROCESSING': '10', 'DB_POOL_MAX_SIZE': '30',
     'QUEUE_MAX_CONCURRENT_PROCESSING': '10', 'QUEUE_CLAIM_BATCH_SIZE': '10',
     'QUEUE_WORKER_FIXED_DELAY': '100', 'QUEUE_WORKER_INITIAL_DELAY': '1000',
     'QUEUE_RECOVERY_FIXED_DELAY': '5000', 'QUEUE_RECOVERY_INITIAL_DELAY': '5000',
@@ -209,7 +210,7 @@ class Environment:
                 'worker': {key: os.environ.get(key, value) for key, value in WORKER_DEFAULTS.items()},
                 'workerConfigSource': 'operator launch environment and repository defaults; not read from a remote config endpoint',
                 'declaredJvmOptions': os.environ.get('BASELINE_JVM_OPTIONS', 'UNRECORDED'),
-                'appProfile': 'local', 'composeProject': self.compose[-1],
+                'appProfile': os.environ.get('SPRING_PROFILES_ACTIVE', 'local'), 'composeProject': self.compose[-1],
                 'baseUrl': self.base_url, 'prometheusUrl': self.prometheus_url,
                 'expectedMetricsTarget': self.metrics_target}
 
@@ -220,6 +221,7 @@ class Environment:
                    'heap': 'jvm_memory_used_bytes{job="flash-sale",area="heap"}',
                    'gc': 'jvm_gc_pause_seconds_sum{job="flash-sale"}',
                    'threads': 'jvm_threads_live_threads{job="flash-sale"}',
+                   'executor': '{__name__=~"executor_(active_threads|queued_tasks|pool_size_threads|completed_tasks_total)",job="flash-sale",name="reservation.queue"}',
                    'hikari': '{__name__=~"hikaricp_connections_(active|pending|timeout_total)",job="flash-sale"}'}
         results = {}
         for name, query in queries.items():

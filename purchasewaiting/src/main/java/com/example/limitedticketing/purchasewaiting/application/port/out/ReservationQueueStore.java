@@ -10,13 +10,15 @@ public interface ReservationQueueStore {
 
     void enqueue(ReservationQueueEntry entry);
 
-    List<UUID> claimNext(Long saleProductId, int maxConcurrentProcessing, int claimBatchSize, Instant claimedAt);
+    List<ReservationQueueClaim> claimNext(Long saleProductId, int maxConcurrentProcessing, int claimBatchSize, Instant claimedAt);
 
     void releaseProcessing(ReservationQueueEntry entry);
 
-    void releaseProcessing(Long saleProductId, UUID queueEntryId);
+    void releaseProcessing(Long saleProductId, UUID queueEntryId, UUID token);
 
-    void requeue(ReservationQueueEntry entry);
+    void requeue(ReservationQueueEntry entry, UUID previousToken);
+
+    void restoreWaiting(ReservationQueueEntry entry);
 
     boolean contains(Long saleProductId, UUID queueEntryId);
 

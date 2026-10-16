@@ -13,7 +13,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -23,6 +22,38 @@ public class ReservationQueueEntryRepositoryAdapter implements ReservationQueueE
 
     public ReservationQueueEntryRepositoryAdapter(JpaReservationQueueEntryRepository jpaReservationQueueEntryRepository) {
         this.jpaReservationQueueEntryRepository = jpaReservationQueueEntryRepository;
+    }
+
+    @Override
+    public void lockQueue(Long saleProductId) {
+        jpaReservationQueueEntryRepository.lockQueue(saleProductId);
+    }
+
+    @Override
+    public long countActive(Long saleProductId) {
+        return jpaReservationQueueEntryRepository.countBySaleProductIdAndStatusIn(
+            saleProductId, List.of(ReservationQueueStatus.WAITING, ReservationQueueStatus.PROCESSING));
+    }
+
+    @Override
+    public long countProcessing(Long saleProductId) {
+        return jpaReservationQueueEntryRepository.countBySaleProductIdAndStatusIn(
+            saleProductId, List.of(ReservationQueueStatus.PROCESSING));
+    }
+
+    @Override
+    public Optional<ReservationQueueEntry> claim(UUID id, UUID token, LocalDateTime now, LocalDateTime leaseUntil) {
+        return jpaReservationQueueEntryRepository.claim(id, token, now, leaseUntil) == 1 ? findById(id) : Optional.empty();
+    }
+
+    @Override
+    public Optional<ReservationQueueEntry> findByIdForUpdate(UUID id) {
+        return jpaReservationQueueEntryRepository.findLocked(id).map(ReservationQueueEntryJpaEntity::toDomain);
+    }
+
+    @Override
+    public Optional<ReservationQueueEntry> findByIdForUpdateSkipLocked(UUID id) {
+        return jpaReservationQueueEntryRepository.findLockedIfAvailable(id).map(ReservationQueueEntryJpaEntity::toDomain);
     }
 
     @Override
@@ -73,37 +104,23 @@ public class ReservationQueueEntryRepositoryAdapter implements ReservationQueueE
     }
 
     @Override
-    public List<ReservationQueueEntry> findWaitingEntriesAfter(Long saleProductId, long queueSequence, int limit) {
-        return jpaReservationQueueEntryRepository
-            .findBySaleProductIdAndStatusAndQueueSequenceGreaterThanOrderByQueueSequenceAsc(
-                saleProductId,
-                ReservationQueueStatus.WAITING,
-                queueSequence,
-                PageRequest.of(0, limit)
-            )
-            .stream()
-            .map(ReservationQueueEntryJpaEntity::toDomain)
-            .toList();
+    public List<ReservationQueueEntry> findWaitingEntriesAfter(Long saleProductId, long sequence, UUID entryId, int limit) {
+        return jpaReservationQueueEntryRepository.findWaitingPage(saleProductId, sequence, entryId, limit)
+            .stream().map(ReservationQueueEntryJpaEntity::toDomain).toList();
     }
 
     @Override
-    public List<ReservationQueueEntry> findProcessingEntriesStartedBefore(LocalDateTime threshold, int limit) {
-        return jpaReservationQueueEntryRepository.findByStatusAndProcessingStartedAtBeforeOrderByProcessingStartedAtAsc(
-                ReservationQueueStatus.PROCESSING,
-                threshold,
-                PageRequest.of(0, limit)
-            )
-            .stream()
-            .map(ReservationQueueEntryJpaEntity::toDomain)
-            .toList();
+    public List<ReservationQueueEntry> findExpiredProcessingEntries(LocalDateTime now, int limit) {
+        return jpaReservationQueueEntryRepository.findExpiredProcessingPage(now, limit)
+            .stream().map(ReservationQueueEntryJpaEntity::toDomain).toList();
     }
 
     @Override
-    public Set<UUID> findExistingIds(Collection<UUID> queueEntryIds) {
+    public Set<UUID> findActiveIds(Collection<UUID> queueEntryIds) {
         if (queueEntryIds.isEmpty()) {
             return Set.of();
         }
-        return Set.copyOf(jpaReservationQueueEntryRepository.findExistingIds(queueEntryIds));
+        return Set.copyOf(jpaReservationQueueEntryRepository.findActiveIds(queueEntryIds));
     }
 
     @Override

@@ -43,6 +43,9 @@ Flyway가 시작 시 [DB migration](../../app/src/main/resources/db/migration)�
 
 | 환경 변수 | 기본값 | 설명 |
 |---|---:|---|
+| `QUEUE_MAX_OUTSTANDING` | 10000 | 상품별 WAITING + PROCESSING 접수 상한 |
+| `QUEUE_GLOBAL_CONCURRENT_PROCESSING` | 10 | 앱 전체 실행 스레드 수, 내부 대기 버퍼 0 |
+| `DB_POOL_MAX_SIZE` | 30 | Hikari 최대 연결 수 |
 | `QUEUE_MAX_CONCURRENT_PROCESSING` | 10 | 상품별 동시 DB 예약 처리 수 |
 | `QUEUE_CLAIM_BATCH_SIZE` | 10 | Worker가 한 번에 claim하는 최대 항목 수 |
 | `QUEUE_WORKER_FIXED_DELAY` | 100ms | 대기 항목 claim 주기 |
@@ -50,7 +53,11 @@ Flyway가 시작 시 [DB migration](../../app/src/main/resources/db/migration)�
 | `QUEUE_RECOVERY_FIXED_DELAY` | 5000ms | DB/Redis 불일치와 stale PROCESSING 복구 주기 |
 | `QUEUE_RECOVERY_INITIAL_DELAY` | 5000ms | 애플리케이션 시작 후 첫 Recovery 실행 지연 |
 | `QUEUE_RECOVERY_BATCH_SIZE` | 1000 | Recovery의 DB keyset 및 존재 확인 배치 크기 |
-| `QUEUE_PROCESSING_TIMEOUT_SECONDS` | 30 | PROCESSING을 중단 상태로 판단하는 시간 |
+| `QUEUE_PROCESSING_TIMEOUT_SECONDS` | 30 | 처리 시작 권한의 lease, 실행 중 잠긴 행은 회수하지 않음 |
+
+Worker는 외부 결과 트랜잭션과 내부 예약 트랜잭션에서 연결을 각각 사용한다. `DB_POOL_MAX_SIZE`를 전체 Worker 수보다 크게 두고 HTTP·만료·복구 작업의 여유도 확보한다. 기본값은 Worker 10·최대 연결 30이다. 연결 여유가 부족하면 Worker 수를 줄인다. V6 적용 전 이전 앱을 중지하고 새 버전만 실행한다.
+
+직접 예약 HTTP를 비교 측정할 때만 `SPRING_PROFILES_ACTIVE=local,baseline`으로 실행한다. 기본 `local`에서는 직접 예약 HTTP를 제공하지 않는다.
 
 로컬 프로필에서는 실제 인증 구현 대신 다음 헤더를 사용합니다.
 
@@ -72,7 +79,7 @@ X-Admin-Id: admin
 | `GET` | `/api/sale-products` | 판매 상품 목록 조회 |
 | `GET` | `/api/sale-products/{id}` | 판매 상품 상세 조회 |
 | `POST` | `/api/idempotency-keys` | 구매 또는 결제 요청 키 발급 |
-| `POST` | `/api/sale-products/{id}/purchases` | 직접 구매 예약 |
+| `POST` | `/api/sale-products/{id}/purchases` | 직접 구매 예약 (`baseline` 전용) |
 | `POST` | `/api/purchases/{id}/cancel` | 구매 예약 취소 |
 | `POST` | `/api/purchases/{id}/payments` | 결제 시도 생성 |
 | `POST` | `/api/payments/{id}/approve` | 결제 승인 |

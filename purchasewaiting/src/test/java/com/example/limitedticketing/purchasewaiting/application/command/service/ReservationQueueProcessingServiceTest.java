@@ -43,17 +43,36 @@ class ReservationQueueProcessingServiceTest {
     @Mock
     private ReservationQueueEntryRepository repository;
 
+    private final UUID token = UUID.randomUUID();
     private ReservationQueueEntry entry;
     private ReservationQueueProcessingService service;
 
     @BeforeEach
     void createService() {
         entry = ReservationQueueEntry.enqueue(UUID.randomUUID(), 1L, 2L, "purchase-1", 42, NOW.minusMinutes(1));
-        entry.beginProcessing(NOW.minusSeconds(1));
-        when(repository.findById(entry.getId())).thenReturn(Optional.of(entry));
-        service = new ReservationQueueProcessingService(purchaseFacade, new ReservationQueueCompletionService(
+        entry.beginProcessing(token, NOW.minusSeconds(1), NOW.plusSeconds(30));
+        when(repository.findByIdForUpdate(entry.getId())).thenReturn(Optional.of(entry));
+        service = new ReservationQueueProcessingService(new ReservationQueuePurchaseService(purchaseFacade), new ReservationQueueCompletionService(
             new ReservationQueueEntryFinder(repository), repository, CLOCK
         ));
+    }
+
+    @Test
+    @DisplayName("이전 시도는 새 토큰의 요청을 예약하거나 완료할 수 없다")
+    void staleAttemptCannotReserveOrComplete() {
+        assertThat(service.process(entry.getId(), UUID.randomUUID())).isEmpty();
+        verify(purchaseFacade, never()).reserve(any());
+        verify(repository, never()).save(any());
+        assertThat(entry.getStatus()).isEqualTo(ReservationQueueStatus.PROCESSING);
+    }
+
+    @Test
+    @DisplayName("이미 만료된 처리 권한으로 새 구매 예약을 시작하지 않는다")
+    void expiredAttemptCannotStartAReservation() {
+        entry.returnToWaiting();
+        entry.beginProcessing(token, NOW.minusSeconds(40), NOW.minusSeconds(10));
+        assertThat(service.process(entry.getId(), token)).isEmpty();
+        verify(purchaseFacade, never()).reserve(any());
     }
 
     @Test
@@ -61,9 +80,10 @@ class ReservationQueueProcessingServiceTest {
     void successfulReservationCompletesTheWaitingRequestWithItsPurchaseId() {
         when(purchaseFacade.reserve(new ReservePurchaseInput(1L, 2L, "purchase-1")))
             .thenReturn(new PurchaseReservation(10L, "PENDING_PAYMENT", NOW.plusMinutes(5)));
+        when(repository.findById(entry.getId())).thenReturn(Optional.of(entry));
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
-        ReservationQueueEntry result = service.process(entry.getId());
+        ReservationQueueEntry result = service.process(entry.getId(), token).orElseThrow();
 
         assertThat(result.getStatus()).isEqualTo(ReservationQueueStatus.RESERVED);
         assertThat(result.getPurchaseId()).isEqualTo(10L);
@@ -78,9 +98,10 @@ class ReservationQueueProcessingServiceTest {
     void businessRejectionIsRecordedWithItsOriginalFailureCode(String code, ReservationQueueStatus expectedStatus) {
         DomainException rejection = new DomainException(DomainErrorType.CONFLICT, code, "구매 예약 거부") { };
         when(purchaseFacade.reserve(any())).thenThrow(rejection);
+        when(repository.findById(entry.getId())).thenReturn(Optional.of(entry));
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
-        ReservationQueueEntry result = service.process(entry.getId());
+        ReservationQueueEntry result = service.process(entry.getId(), token).orElseThrow();
 
         assertThat(result.getStatus()).isEqualTo(expectedStatus);
         assertThat(result.getFailureCode()).isEqualTo(code);
@@ -95,7 +116,7 @@ class ReservationQueueProcessingServiceTest {
         IllegalStateException failure = new IllegalStateException("구매 저장소 연결 실패");
         when(purchaseFacade.reserve(any())).thenThrow(failure);
 
-        assertThatThrownBy(() -> service.process(entry.getId())).isSameAs(failure);
+        assertThatThrownBy(() -> service.process(entry.getId(), token)).isSameAs(failure);
 
         assertThat(entry.getStatus()).isEqualTo(ReservationQueueStatus.PROCESSING);
         assertThat(entry.getCompletedAt()).isNull();

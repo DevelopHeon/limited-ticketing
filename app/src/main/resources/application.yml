@@ -7,6 +7,8 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/limited_ticketing}
     username: ${DB_USERNAME:limited_ticketing}
     password: ${DB_PASSWORD:limited_ticketing}
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:30}
   jpa:
     hibernate:
       ddl-auto: validate
@@ -22,7 +24,10 @@ spring:
 
 limited-ticketing:
   queue:
+    admission:
+      max-outstanding: ${QUEUE_MAX_OUTSTANDING:10000}
     worker:
+      global-concurrent-processing: ${QUEUE_GLOBAL_CONCURRENT_PROCESSING:10}
       max-concurrent-processing: ${QUEUE_MAX_CONCURRENT_PROCESSING:10}
       claim-batch-size: ${QUEUE_CLAIM_BATCH_SIZE:10}
       fixed-delay: ${QUEUE_WORKER_FIXED_DELAY:100}

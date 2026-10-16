@@ -2,11 +2,11 @@
 
 - 상태: **Accepted · 구현은 단계별 적용**
 - 결정일: 2026-10-15. 사용자와 계층 방향을 논의해 채택했다.
-- 현재 Scheduler/Worker 이전은 미구현이며 2단계, Kafka Consumer는 3단계에 적용한다. 1단계 관측 범위는 유지한다.
+- 2단계에서 구매 대기·구매 만료 Scheduler와 내부 입력 Facade 분리를 적용했다. Kafka Consumer는 3단계 대상이며 아직 없다.
 
 ## 배경과 대안
 
-현재 `ReservationQueueWorker`는 infrastructure에서 스케줄 실행, DB 조회, Redis claim, 구매 처리와 슬롯 반환을 조율한다. Kafka와 캐시를 추가하면서 기술 이름만으로 모든 코드를 infrastructure에 두면 업무를 시작하는 입력과 외부 저장소를 사용하는 출력이 섞인다.
+결정 당시 `ReservationQueueWorker`는 infrastructure에서 스케줄 실행, DB 조회, Redis claim, 구매 처리와 슬롯 반환을 조율한다. Kafka와 캐시를 추가하면서 기술 이름만으로 모든 코드를 infrastructure에 두면 업무를 시작하는 입력과 외부 저장소를 사용하는 출력이 섞인다.
 
 대안은 모든 기술 어댑터를 infrastructure에 두거나, 입출력 역할로 구분하는 것이다. Redis 관련 코드를 전부 presentation으로 옮기는 방식은 저장소 구현이 입력 계층에 섞이므로 채택하지 않는다.
 
@@ -22,10 +22,10 @@
 
 HTTP·메시지·스케줄 입력이 동일한 업무 유스케이스를 사용한다. 패키지 이동만으로 해결되지 않아 현재 Worker의 책임을 분리하고 입력 Facade와 테스트를 보완해야 한다. ArchUnit 규칙을 느슨하게 해서 이동을 통과시키지 않는다. Modulith는 기존처럼 모듈 간 공개 계약을 검증한다.
 
-현재 동작 문서는 실제 이전 후에 갱신한다. 필요한 코드가 없으면 consumer/scheduler 패키지나 빈 Port를 선행 생성하지 않는다.
+현재 흐름은 [구매 대기 계약](../architecture/purchase-waiting.md)에 반영했다. 필요한 코드가 없으면 consumer/scheduler 패키지나 빈 Port를 선행 생성하지 않는다.
 
 ## 근거
 
-- [현재 Worker](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/infrastructure/scheduler/ReservationQueueWorker.java)
+- [현재 Scheduler](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/presentation/scheduler/ReservationQueueScheduler.java)
 - [현재 ArchUnit 검사](../../app/src/test/java/com/example/limitedticketing/architecture/LayeringArchitectureTests.java)
 - [구현 단계](../plans/2026-10-15-flash-sale-implementation-plan.md#5-단계별-산출물과-검토-지점)

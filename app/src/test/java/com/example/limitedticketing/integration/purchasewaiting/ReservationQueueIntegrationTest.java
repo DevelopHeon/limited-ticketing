@@ -19,7 +19,7 @@ import com.example.limitedticketing.purchase.application.port.in.dto.ReservePurc
 import com.example.limitedticketing.purchasewaiting.domain.model.ReservationQueueStatus;
 import com.example.limitedticketing.purchasewaiting.application.command.service.ReservationQueueClaimService;
 import com.example.limitedticketing.purchasewaiting.application.command.service.ReservationQueueRecoveryService;
-import com.example.limitedticketing.purchasewaiting.infrastructure.scheduler.ReservationQueueWorker;
+import com.example.limitedticketing.purchasewaiting.application.port.in.worker.ReservationQueueWorkerFacade;
 import com.example.limitedticketing.sale.domain.model.Product;
 import com.example.limitedticketing.sale.domain.model.SaleProduct;
 import com.example.limitedticketing.sale.domain.repository.ProductRepository;
@@ -28,11 +28,37 @@ import com.example.limitedticketing.shared.vo.Money;
 import com.example.limitedticketing.shared.vo.SalePeriod;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.limitedticketing.purchasewaiting.application.command.service.ReservationQueueProcessingService;
+import com.example.limitedticketing.purchasewaiting.application.port.out.ReservationQueueStore;
+import com.example.limitedticketing.purchasewaiting.application.port.out.ReservationQueueTaskExecutor;
+import com.example.limitedticketing.purchasewaiting.application.port.out.ReservationQueueClaim;
+import com.example.limitedticketing.purchasewaiting.domain.model.ReservationQueueEntry;
+import com.example.limitedticketing.purchasewaiting.domain.repository.ReservationQueueEntryRepository;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import java.time.Instant;
+import com.example.limitedticketing.purchasewaiting.application.command.service.ReservationQueueDispatchService;
+import java.time.Clock;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.doCallRealMethod;
+import org.springframework.data.redis.RedisConnectionFailureException;
+import java.util.concurrent.RejectedExecutionException;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
+import java.util.ArrayList;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -51,7 +77,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers
-@SpringBootTest
+@SpringBootTest(properties = "spring.datasource.hikari.connection-timeout=1000")
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @DisplayName("구매 대기 접수와 처리 및 장애 복구 통합 검증")
@@ -74,7 +100,7 @@ class ReservationQueueIntegrationTest {
     private StringRedisTemplate stringRedisTemplate;
 
     @Autowired
-    private ReservationQueueWorker reservationQueueWorker;
+    private ReservationQueueWorkerFacade reservationQueueWorker;
 
     @Autowired
     private ReservationQueueClaimService reservationQueueClaimService;
@@ -103,6 +129,17 @@ class ReservationQueueIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @MockitoSpyBean
+    private ReservationQueueStore queueStore;
+    @MockitoSpyBean
+    private ReservationQueueEntryRepository queueRepository;
+    @Autowired
+    private ReservationQueueProcessingService processingService;
+    @Autowired
+    private ReservationQueueTaskExecutor taskExecutor;
+    @Autowired
+    private PlatformTransactionManager transactions;
+
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", postgresql::getJdbcUrl);
@@ -112,6 +149,73 @@ class ReservationQueueIntegrationTest {
         registry.add("spring.data.redis.port", redis::getFirstMappedPort);
         registry.add("limited-ticketing.queue.worker.initial-delay", () -> "600000");
         registry.add("limited-ticketing.queue.worker.recovery-initial-delay", () -> "600000");
+        registry.add("limited-ticketing.queue.worker.recovery-batch-size", () -> "2");
+    }
+
+    @Test
+    @DisplayName("Redis 순번 키가 유실되어도 새 대기는 기존 원장 순번 뒤에 배치된다")
+    void sequenceSurvivesRedisCounterLoss() throws Exception {
+        Fixture fixture = createFixture(2);
+        QueueEntry first = enqueue(fixture.saleProductId(), fixture.firstMemberId(), issuePurchaseKey(fixture.firstMemberId()));
+        stringRedisTemplate.delete("sequence:sale:" + fixture.saleProductId());
+        QueueEntry second = enqueue(fixture.saleProductId(), fixture.secondMemberId(), issuePurchaseKey(fixture.secondMemberId()));
+        Long firstSequence = jdbcTemplate.queryForObject(
+            "select queue_sequence from reservation_queue_entries where id = ?", Long.class, first.id());
+        Long secondSequence = jdbcTemplate.queryForObject(
+            "select queue_sequence from reservation_queue_entries where id = ?", Long.class, second.id());
+        assertThat(secondSequence).isGreaterThan(firstSequence);
+    }
+
+    @Test
+    @DisplayName("순번 동점이 복구 배치 경계에 있어도 모든 대기를 빠짐없이 복원한다")
+    void equalSequencesDoNotSkipTheNextRecoveryPage() throws Exception {
+        Fixture fixture = createFixture(3);
+        Member third = memberRepository.save(Member.register("queue-tie-" + System.nanoTime(), "동점 회원"));
+        List<QueueEntry> entries = List.of(
+            enqueue(fixture.saleProductId(), fixture.firstMemberId(), issuePurchaseKey(fixture.firstMemberId())),
+            enqueue(fixture.saleProductId(), fixture.secondMemberId(), issuePurchaseKey(fixture.secondMemberId())),
+            enqueue(fixture.saleProductId(), third.getId(), issuePurchaseKey(third.getId()))
+        );
+        jdbcTemplate.update("update reservation_queue_entries set queue_sequence = 1 where sale_product_id = ?", fixture.saleProductId());
+        String waiting = "waiting:sale:" + fixture.saleProductId();
+        stringRedisTemplate.delete(waiting);
+        reservationQueueRecoveryService.recover();
+        assertThat(stringRedisTemplate.opsForZSet().zCard(waiting)).isEqualTo(3);
+        entries.forEach(entry -> assertThat(stringRedisTemplate.opsForZSet().rank(waiting, entry.id().toString())).isNotNull());
+    }
+
+    @Test
+    @DisplayName("여러 Worker가 같은 요청을 동시에 claim해도 처리 권한은 하나만 발급된다")
+    void concurrentClaimsHaveOneWinner() throws Exception {
+        Fixture fixture = createFixture(1);
+        QueueEntry entry = enqueue(fixture.saleProductId(), fixture.firstMemberId(), issuePurchaseKey(fixture.firstMemberId()));
+        ExecutorService executor = Executors.newFixedThreadPool(8);
+        CountDownLatch ready = new CountDownLatch(8);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<Optional<com.example.limitedticketing.purchasewaiting.domain.model.ReservationQueueEntry>>> results = new ArrayList<>();
+        try {
+            for (int index = 0; index < 8; index++) {
+                results.add(executor.submit(() -> {
+                    ready.countDown();
+                    if (!start.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Concurrent claim start timed out");
+                    }
+                    return reservationQueueClaimService.claim(entry.id(), UUID.randomUUID());
+                }));
+            }
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            int winners = 0;
+            for (Future<Optional<com.example.limitedticketing.purchasewaiting.domain.model.ReservationQueueEntry>> result : results) {
+                if (result.get(5, TimeUnit.SECONDS).isPresent()) {
+                    winners++;
+                }
+            }
+            assertThat(winners).isEqualTo(1);
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+        }
     }
 
     @Test
@@ -158,6 +262,7 @@ class ReservationQueueIntegrationTest {
 
         enqueue(fixture.saleProductId(), fixture.firstMemberId(), issuePurchaseKey(fixture.firstMemberId()));
 
+        stringRedisTemplate.delete("admission:sale:" + fixture.saleProductId() + ":member:" + fixture.firstMemberId());
         mockMvc.perform(post("/api/sale-products/{saleProductId}/queue-entries", fixture.saleProductId())
                 .header("X-Member-Id", fixture.firstMemberId())
                 .header("Idempotency-Key", issuePurchaseKey(fixture.firstMemberId())))
@@ -222,7 +327,7 @@ class ReservationQueueIntegrationTest {
         Fixture fixture = createFixture(2);
         String requestKey = "waiting-purchase-committed";
         QueueEntry entry = enqueue(fixture.saleProductId(), fixture.firstMemberId(), requestKey);
-        reservationQueueClaimService.claim(entry.id()).orElseThrow();
+        reservationQueueClaimService.claim(entry.id(), UUID.randomUUID()).orElseThrow();
         String waitingKey = "waiting:sale:" + fixture.saleProductId();
         String processingKey = "processing:sale:" + fixture.saleProductId();
         stringRedisTemplate.opsForZSet().remove(waitingKey, entry.id().toString());
@@ -231,8 +336,9 @@ class ReservationQueueIntegrationTest {
             new ReservePurchaseInput(fixture.firstMemberId(), fixture.saleProductId(), requestKey)
         );
 
-        // Simulate a worker stopping after the purchase commits but before the waiting request completes.
-        reservationQueueRecoveryService.recover(0);
+        jdbcTemplate.update("update reservation_queue_entries set lease_until = ? where id = ?",
+            LocalDateTime.of(2000, 1, 1, 0, 0), entry.id());
+        reservationQueueRecoveryService.recover();
         reservationQueueWorker.dispatchWaitingEntries();
 
         QueueEntry recoveredEntry = awaitCompletion(entry.id(), fixture.firstMemberId());
@@ -259,11 +365,13 @@ class ReservationQueueIntegrationTest {
         String waitingKey = "waiting:sale:" + fixture.saleProductId();
         String processingKey = "processing:sale:" + fixture.saleProductId();
 
-        reservationQueueClaimService.claim(entry.id()).orElseThrow();
+        reservationQueueClaimService.claim(entry.id(), UUID.randomUUID()).orElseThrow();
         stringRedisTemplate.opsForZSet().remove(waitingKey, entry.id().toString());
         stringRedisTemplate.opsForZSet().add(processingKey, entry.id().toString(), 0);
 
-        reservationQueueRecoveryService.recover(0);
+        jdbcTemplate.update("update reservation_queue_entries set lease_until = ? where id = ?",
+            LocalDateTime.of(2000, 1, 1, 0, 0), entry.id());
+        reservationQueueRecoveryService.recover();
 
         QueueEntry recoveredEntry = find(entry.id(), fixture.firstMemberId());
         assertThat(recoveredEntry.status()).isEqualTo(ReservationQueueStatus.WAITING);
@@ -274,7 +382,7 @@ class ReservationQueueIntegrationTest {
     @Test
     @DisplayName("Redis에서 가져온 요청이 DB에 없으면 처리 대상에서 제외한다")
     void returnsEmptyWhenClaimedRedisEntryDoesNotExistInDatabase() {
-        assertThat(reservationQueueClaimService.claim(UUID.randomUUID())).isEmpty();
+        assertThat(reservationQueueClaimService.claim(UUID.randomUUID(), UUID.randomUUID())).isEmpty();
     }
 
     @Test
@@ -293,7 +401,7 @@ class ReservationQueueIntegrationTest {
         String waitingKey = "waiting:sale:" + fixture.saleProductId();
         stringRedisTemplate.delete(waitingKey);
 
-        reservationQueueRecoveryService.recover(30);
+        reservationQueueRecoveryService.recover();
 
         entries.forEach(entry -> assertThat(
             stringRedisTemplate.opsForZSet().rank(waitingKey, entry.id().toString())
@@ -315,7 +423,7 @@ class ReservationQueueIntegrationTest {
             System.currentTimeMillis()
         );
 
-        reservationQueueRecoveryService.recover(30);
+        reservationQueueRecoveryService.recover();
 
         assertThat(stringRedisTemplate.opsForZSet().rank(waitingKey, missingWaitingEntryId.toString())).isNull();
         assertThat(stringRedisTemplate.opsForZSet().rank(processingKey, missingProcessingEntryId.toString())).isNull();
@@ -332,7 +440,7 @@ class ReservationQueueIntegrationTest {
             1
         );
 
-        reservationQueueRecoveryService.recover(30);
+        reservationQueueRecoveryService.recover();
 
         assertThat(stringRedisTemplate.hasKey("waiting:sale:" + missingSaleProductId)).isFalse();
         assertThat(stringRedisTemplate.hasKey("processing:sale:" + missingSaleProductId)).isFalse();
@@ -355,11 +463,219 @@ class ReservationQueueIntegrationTest {
         saleProduct.close();
         saleProductRepository.save(saleProduct);
 
-        reservationQueueRecoveryService.recover(30);
+        reservationQueueRecoveryService.recover();
 
         assertThat(stringRedisTemplate.hasKey("waiting:sale:" + fixture.saleProductId())).isFalse();
         assertThat(stringRedisTemplate.hasKey("processing:sale:" + fixture.saleProductId())).isFalse();
         assertThat(stringRedisTemplate.hasKey("sequence:sale:" + fixture.saleProductId())).isFalse();
+    }
+
+    @Test
+    @DisplayName("만료된 이전 Worker는 새 시도의 슬롯을 해제하거나 구매를 중복 예약할 수 없다")
+    void staleWorkerCannotReleaseOrRequeueTheNewAttempt() throws Exception {
+        Fixture fixture = createFixture(1);
+        QueueEntry entry = enqueue(fixture.saleProductId(), fixture.firstMemberId(), issuePurchaseKey(fixture.firstMemberId()));
+        ReservationQueueClaim first = queueStore.claimNext(fixture.saleProductId(), 10, 1, Instant.now()).get(0);
+        reservationQueueClaimService.claim(entry.id(), first.token()).orElseThrow();
+        jdbcTemplate.update("update reservation_queue_entries set lease_until = ? where id = ?",
+            LocalDateTime.of(2000, 1, 1, 0, 0), entry.id());
+        reservationQueueRecoveryService.recover();
+        ReservationQueueEntry waiting = queueRepository.findById(entry.id()).orElseThrow();
+        ReservationQueueClaim second = queueStore.claimNext(fixture.saleProductId(), 10, 1, Instant.now()).get(0);
+        reservationQueueClaimService.claim(entry.id(), second.token()).orElseThrow();
+
+        assertThat(processingService.process(entry.id(), first.token())).isEmpty();
+        queueStore.releaseProcessing(fixture.saleProductId(), entry.id(), first.token());
+        queueStore.requeue(waiting, first.token());
+
+        assertThat(queueRepository.findById(entry.id()).orElseThrow().getProcessingToken()).isEqualTo(second.token());
+        assertThat(stringRedisTemplate.opsForZSet().zCard("processing:sale:" + fixture.saleProductId())).isEqualTo(1);
+        assertThat(stringRedisTemplate.opsForZSet().zCard("waiting:sale:" + fixture.saleProductId())).isZero();
+        assertThat(jdbcTemplate.queryForObject("select count(*) from purchases where sale_product_id = ?",
+            Long.class, fixture.saleProductId())).isZero();
+        ReservationQueueEntry completed = processingService.process(entry.id(), second.token()).orElseThrow();
+        queueStore.releaseProcessing(completed);
+        assertThat(completed.getStatus()).isEqualTo(ReservationQueueStatus.RESERVED);
+        assertThat(inventoryRepository.findById(fixture.inventoryId()).orElseThrow().getReservedQuantity()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("lease가 만료되어도 실행 중인 DB 행 잠금이 있으면 복구가 처리 권한을 빼앗지 않는다")
+    void recoverySkipsAnExpiredAttemptWhoseExecutionStillHoldsTheRowLock() throws Exception {
+        Fixture fixture = createFixture(1);
+        QueueEntry entry = enqueue(fixture.saleProductId(), fixture.firstMemberId(), issuePurchaseKey(fixture.firstMemberId()));
+        ReservationQueueClaim claim = queueStore.claimNext(fixture.saleProductId(), 10, 1, Instant.now()).get(0);
+        reservationQueueClaimService.claim(entry.id(), claim.token()).orElseThrow();
+        jdbcTemplate.update("update reservation_queue_entries set lease_until = ? where id = ?",
+            LocalDateTime.of(2000, 1, 1, 0, 0), entry.id());
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService thread = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> running = thread.submit(() -> new TransactionTemplate(transactions).executeWithoutResult(status -> {
+                queueRepository.findByIdForUpdate(entry.id()).orElseThrow();
+                locked.countDown();
+                awaitLatch(release);
+            }));
+            assertThat(locked.await(5, TimeUnit.SECONDS)).isTrue();
+            reservationQueueRecoveryService.recover();
+            assertThat(queueRepository.findById(entry.id()).orElseThrow().ownsAttempt(claim.token())).isTrue();
+            assertThat(stringRedisTemplate.opsForZSet().zCard("processing:sale:" + fixture.saleProductId())).isEqualTo(1);
+            release.countDown();
+            running.get(5, TimeUnit.SECONDS);
+            reservationQueueRecoveryService.recover();
+            assertThat(queueRepository.findById(entry.id()).orElseThrow().getStatus()).isEqualTo(ReservationQueueStatus.WAITING);
+            assertThat(queueStore.findPosition(fixture.saleProductId(), entry.id())).isPresent();
+        } finally {
+            release.countDown();
+            thread.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("전역 Worker 슬롯이 가득 차면 상품이 여러 개여도 DB와 Redis 대기를 claim하지 않는다")
+    void fullExecutorLeavesEverySaleWaiting() throws Exception {
+        Fixture first = createFixture(1);
+        Fixture second = createFixture(1);
+        QueueEntry firstEntry = enqueue(first.saleProductId(), first.firstMemberId(), issuePurchaseKey(first.firstMemberId()));
+        QueueEntry secondEntry = enqueue(second.saleProductId(), second.firstMemberId(), issuePurchaseKey(second.firstMemberId()));
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(taskExecutor.availableSlots()).isEqualTo(10));
+        CountDownLatch running = new CountDownLatch(10);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            for (int index = 0; index < 10; index++) {
+                taskExecutor.execute(() -> {
+                    running.countDown();
+                    awaitLatch(release);
+                });
+            }
+            assertThat(running.await(5, TimeUnit.SECONDS)).isTrue();
+            reservationQueueWorker.dispatchWaitingEntries();
+            for (QueueEntry entry : List.of(firstEntry, secondEntry)) {
+                ReservationQueueEntry persisted = queueRepository.findById(entry.id()).orElseThrow();
+                assertThat(persisted.getStatus()).isEqualTo(ReservationQueueStatus.WAITING);
+                assertThat(queueStore.findPosition(persisted.getSaleProductId(), entry.id())).isPresent();
+                assertThat(queueRepository.countProcessing(persisted.getSaleProductId())).isZero();
+            }
+        } finally {
+            release.countDown();
+            await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(taskExecutor.availableSlots()).isEqualTo(10));
+        }
+    }
+
+    @Test
+    @DisplayName("전역 슬롯 전체를 동시에 처리해도 내부 예약 트랜잭션이 DB 연결 부족으로 멈추지 않는다")
+    void everyWorkerCanAcquireItsNestedPurchaseConnection() throws Exception {
+        Fixture fixture = createFixture(10);
+        List<QueueEntry> entries = new ArrayList<>();
+        for (int index = 0; index < 10; index++) {
+            Member member = memberRepository.save(Member.register("full-worker-" + System.nanoTime(), "동시 처리 회원"));
+            entries.add(enqueue(fixture.saleProductId(), member.getId(), issuePurchaseKey(member.getId())));
+        }
+        doReturn(List.of(fixture.saleProductId())).when(queueRepository).findSaleProductIdsWithWaitingEntries();
+        CountDownLatch outerTransactions = new CountDownLatch(10);
+        doAnswer(invocation -> {
+            Object locked = invocation.callRealMethod();
+            outerTransactions.countDown();
+            awaitLatch(outerTransactions);
+            return locked;
+        }).when(queueRepository).findByIdForUpdate(any(UUID.class));
+        reservationQueueWorker.dispatchWaitingEntries();
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            for (QueueEntry entry : entries) {
+                assertThat(queueRepository.findById(entry.id()).orElseThrow().getStatus()).isEqualTo(ReservationQueueStatus.RESERVED);
+            }
+        });
+        assertThat(inventoryRepository.findById(fixture.inventoryId()).orElseThrow().getReservedQuantity()).isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("Executor 실행 거부 시 DB 처리 권한을 반환하고 Redis에 원래 순번으로 재대기한다")
+    void rejectedDispatchRestoresTheOriginalWaitingEntry() throws Exception {
+        Fixture fixture = createFixture(1);
+        QueueEntry entry = enqueue(fixture.saleProductId(), fixture.firstMemberId(), issuePurchaseKey(fixture.firstMemberId()));
+        ReservationQueueEntry original = queueRepository.findById(entry.id()).orElseThrow();
+        ReservationQueueTaskExecutor rejecting = new ReservationQueueTaskExecutor() {
+            @Override
+            public int availableSlots() {
+                return 1;
+            }
+            @Override
+            public void execute(Runnable task) {
+                throw new RejectedExecutionException("Deliberate capacity race");
+            }
+        };
+        ReservationQueueDispatchService dispatch = new ReservationQueueDispatchService(queueRepository, queueStore,
+            reservationQueueClaimService, processingService, reservationQueueRecoveryService, rejecting,
+            Clock.systemDefaultZone(), 10, 1);
+        // Earlier test fixtures may also be waiting; rotate through each sale once.
+        int saleCount = queueRepository.findSaleProductIdsWithWaitingEntries().size();
+        for (int index = 0; index < saleCount; index++) {
+            dispatch.dispatchWaitingEntries();
+        }
+        ReservationQueueEntry restored = queueRepository.findById(entry.id()).orElseThrow();
+        assertThat(restored.getStatus()).isEqualTo(ReservationQueueStatus.WAITING);
+        assertThat(restored.getProcessingToken()).isNull();
+        assertThat(restored.getQueueSequence()).isEqualTo(original.getQueueSequence());
+        assertThat(queueStore.findPosition(fixture.saleProductId(), entry.id())).isPresent();
+        assertThat(stringRedisTemplate.opsForZSet().zCard("processing:sale:" + fixture.saleProductId())).isZero();
+    }
+
+    @Test
+    @DisplayName("DB 커밋 뒤 Redis 등록이 실패해도 202와 원장을 유지하고 복구 시 다시 대기시킨다")
+    void committedAdmissionSurvivesRedisEnqueueFailure() throws Exception {
+        Fixture fixture = createFixture(1);
+        doThrow(new RedisConnectionFailureException("Deliberate post-commit outage"))
+            .when(queueStore).enqueue(any(ReservationQueueEntry.class));
+        QueueEntry entry = enqueue(fixture.saleProductId(), fixture.firstMemberId(), issuePurchaseKey(fixture.firstMemberId()));
+        assertThat(queueRepository.findById(entry.id()).orElseThrow().getStatus()).isEqualTo(ReservationQueueStatus.WAITING);
+        assertThat(queueStore.findPosition(fixture.saleProductId(), entry.id())).isEmpty();
+        doCallRealMethod().when(queueStore).enqueue(any(ReservationQueueEntry.class));
+        reservationQueueRecoveryService.recover();
+        assertThat(queueStore.findPosition(fixture.saleProductId(), entry.id())).isPresent();
+    }
+
+    @Test
+    @DisplayName("Redis 처리 슬롯이 유실되어도 DB의 상품별 처리 상한은 초과하지 않는다")
+    void databaseProcessingLimitSurvivesRedisSlotLoss() throws Exception {
+        Fixture fixture = createFixture(10);
+        List<QueueEntry> entries = new ArrayList<>();
+        for (int index = 0; index < 11; index++) {
+            Member member = memberRepository.save(Member.register("lost-slot-" + System.nanoTime(), "슬롯 유실 회원"));
+            entries.add(enqueue(fixture.saleProductId(), member.getId(), issuePurchaseKey(member.getId())));
+        }
+        List<ReservationQueueClaim> claimed = queueStore.claimNext(fixture.saleProductId(), 10, 10, Instant.now());
+        assertThat(claimed).hasSize(10);
+        for (ReservationQueueClaim claim : claimed) {
+            reservationQueueClaimService.claim(claim.queueEntryId(), claim.token()).orElseThrow();
+        }
+        stringRedisTemplate.delete(List.of("processing:sale:" + fixture.saleProductId(),
+            "processing-tokens:sale:" + fixture.saleProductId()));
+        ReservationQueueClaim extra = queueStore.claimNext(fixture.saleProductId(), 10, 1, Instant.now()).get(0);
+        assertThat(reservationQueueClaimService.claim(extra.queueEntryId(), extra.token())).isEmpty();
+        assertThat(queueRepository.countProcessing(fixture.saleProductId())).isEqualTo(10);
+        ReservationQueueEntry waiting = queueRepository.findById(extra.queueEntryId()).orElseThrow();
+        assertThat(waiting.getStatus()).isEqualTo(ReservationQueueStatus.WAITING);
+        queueStore.requeue(waiting, extra.token());
+        jdbcTemplate.update("update reservation_queue_entries set lease_until = ? where sale_product_id = ? and status = 'PROCESSING'",
+            LocalDateTime.of(2000, 1, 1, 0, 0), fixture.saleProductId());
+        reservationQueueRecoveryService.recover();
+        for (QueueEntry entry : entries) {
+            Long memberId = queueRepository.findById(entry.id()).orElseThrow().getMemberId();
+            awaitCompletion(entry.id(), memberId);
+        }
+        assertThat(inventoryRepository.findById(fixture.inventoryId()).orElseThrow().getReservedQuantity()).isEqualTo(10);
+    }
+
+    private static void awaitLatch(CountDownLatch latch) {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Worker latch timed out");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(exception);
+        }
     }
 
     private QueueEntry enqueue(Long saleProductId, Long memberId, String requestKey) throws Exception {
@@ -381,6 +697,7 @@ class ReservationQueueIntegrationTest {
 
     private QueueEntry awaitCompletion(UUID queueEntryId, Long memberId) throws Exception {
         for (int attempts = 0; attempts < 50; attempts++) {
+            reservationQueueWorker.dispatchWaitingEntries();
             QueueEntry entry = find(queueEntryId, memberId);
             if (entry.status() != ReservationQueueStatus.WAITING && entry.status() != ReservationQueueStatus.PROCESSING) {
                 return entry;

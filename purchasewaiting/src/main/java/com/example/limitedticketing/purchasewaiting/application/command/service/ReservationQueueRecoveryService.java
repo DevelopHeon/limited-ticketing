@@ -7,7 +7,6 @@ import com.example.limitedticketing.purchasewaiting.domain.repository.Reservatio
 import com.example.limitedticketing.sale.application.port.in.SaleProductQueryFacade;
 import com.example.limitedticketing.sale.application.port.in.dto.FindSaleProductInput;
 import java.time.Clock;
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -32,6 +31,7 @@ public class ReservationQueueRecoveryService {
     private final ReservationQueueRecoveryStore reservationQueueRecoveryStore;
     private final SaleProductQueryFacade saleProductQueryFacade;
     private final Clock clock;
+    private final ReservationQueueReconciliationService reconciliationService;
     private final int recoveryBatchSize;
 
     public ReservationQueueRecoveryService(
@@ -40,6 +40,7 @@ public class ReservationQueueRecoveryService {
         ReservationQueueRecoveryStore reservationQueueRecoveryStore,
         SaleProductQueryFacade saleProductQueryFacade,
         Clock clock,
+        ReservationQueueReconciliationService reconciliationService,
         @Value("${limited-ticketing.queue.worker.recovery-batch-size:1000}") int recoveryBatchSize
     ) {
         this.reservationQueueEntryRepository = reservationQueueEntryRepository;
@@ -47,6 +48,7 @@ public class ReservationQueueRecoveryService {
         this.reservationQueueRecoveryStore = reservationQueueRecoveryStore;
         this.saleProductQueryFacade = saleProductQueryFacade;
         this.clock = clock;
+        this.reconciliationService = reconciliationService;
         if (recoveryBatchSize <= 0) {
             throw new IllegalArgumentException("Recovery batch size must be positive");
         }
@@ -54,33 +56,36 @@ public class ReservationQueueRecoveryService {
     }
 
     @Transactional
-    public void recover(long processingTimeoutSeconds) {
-        LocalDateTime threshold = LocalDateTime.now(clock).minusSeconds(processingTimeoutSeconds);
-        recoverExpiredProcessingEntries(threshold);
-        registerRedisRecoveryAfterCommit(threshold.atZone(clock.getZone()).toInstant());
+    public void recover() {
+        List<RecoveredAttempt> recovered = recoverExpiredProcessingEntries(LocalDateTime.now(clock));
+        registerRedisRecoveryAfterCommit(recovered);
     }
 
-    private void recoverExpiredProcessingEntries(LocalDateTime threshold) {
+    private List<RecoveredAttempt> recoverExpiredProcessingEntries(LocalDateTime threshold) {
+        List<RecoveredAttempt> recovered = new ArrayList<>();
         while (true) {
             List<ReservationQueueEntry> entries = reservationQueueEntryRepository
-                .findProcessingEntriesStartedBefore(threshold, recoveryBatchSize);
+                .findExpiredProcessingEntries(threshold, recoveryBatchSize);
             if (entries.isEmpty()) {
-                return;
+                return recovered;
             }
 
             entries.forEach(entry -> {
+                UUID token = entry.getProcessingToken();
                 entry.returnToWaiting();
+                recovered.add(new RecoveredAttempt(entry, token));
                 reservationQueueEntryRepository.save(entry);
             });
         }
     }
 
-    private void registerRedisRecoveryAfterCommit(Instant threshold) {
+    private void registerRedisRecoveryAfterCommit(List<RecoveredAttempt> recovered) {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
                 try {
-                    synchronizeRedis(threshold);
+                    recovered.forEach(attempt -> reservationQueueStore.requeue(attempt.entry(), attempt.token()));
+                    synchronizeRedis();
                 } catch (RuntimeException exception) {
                     log.error("Reservation queue recovery could not synchronize Redis", exception);
                 }
@@ -88,12 +93,8 @@ public class ReservationQueueRecoveryService {
         });
     }
 
-    private void synchronizeRedis(Instant threshold) {
+    private void synchronizeRedis() {
         Set<Long> saleProductIds = findRecoverySaleProductIds();
-        saleProductIds.forEach(
-            saleProductId -> reservationQueueRecoveryStore.removeProcessingOlderThan(saleProductId, threshold)
-        );
-
         recoverAllWaitingEntries();
         saleProductIds.addAll(findRecoverySaleProductIds());
         saleProductIds.forEach(this::removeOrphanedRedisEntries);
@@ -113,10 +114,12 @@ public class ReservationQueueRecoveryService {
 
     private void recoverWaitingEntries(Long saleProductId) {
         long cursor = 0;
+        UUID entryCursor = new UUID(0, 0);
         while (true) {
             List<ReservationQueueEntry> entries = reservationQueueEntryRepository.findWaitingEntriesAfter(
                 saleProductId,
                 cursor,
+                entryCursor,
                 recoveryBatchSize
             );
             if (entries.isEmpty()) {
@@ -124,11 +127,12 @@ public class ReservationQueueRecoveryService {
             }
 
             entries.forEach(entry -> {
-                if (!reservationQueueStore.contains(entry.getSaleProductId(), entry.getId())) {
-                    reservationQueueStore.enqueue(entry);
+                if (reservationQueueStore.findPosition(entry.getSaleProductId(), entry.getId()).isEmpty()) {
+                    reconciliationService.restoreWaiting(entry.getId());
                 }
             });
             cursor = entries.get(entries.size() - 1).getQueueSequence();
+            entryCursor = entries.get(entries.size() - 1).getId();
         }
     }
 
@@ -140,16 +144,16 @@ public class ReservationQueueRecoveryService {
         }
 
         Set<UUID> orphanedEntryIds = new HashSet<>(redisEntryIds);
-        orphanedEntryIds.removeAll(findExistingIds(redisEntryIds));
+        orphanedEntryIds.removeAll(findActiveIds(redisEntryIds));
         reservationQueueRecoveryStore.removeWaiting(saleProductId, orphanedEntryIds);
         reservationQueueRecoveryStore.removeProcessing(saleProductId, orphanedEntryIds);
     }
 
-    private Set<UUID> findExistingIds(Set<UUID> queueEntryIds) {
+    private Set<UUID> findActiveIds(Set<UUID> queueEntryIds) {
         List<UUID> ids = new ArrayList<>(queueEntryIds);
         Set<UUID> existingIds = new HashSet<>();
         for (int offset = 0; offset < ids.size(); offset += recoveryBatchSize) {
-            existingIds.addAll(reservationQueueEntryRepository.findExistingIds(
+            existingIds.addAll(reservationQueueEntryRepository.findActiveIds(
                 ids.subList(offset, Math.min(offset + recoveryBatchSize, ids.size()))
             ));
         }
@@ -172,5 +176,7 @@ public class ReservationQueueRecoveryService {
         } catch (RuntimeException exception) {
             log.warn("Could not determine whether Redis keys for sale product {} can be deleted", saleProductId, exception);
         }
+    }
+    private record RecoveredAttempt(ReservationQueueEntry entry, UUID token) {
     }
 }

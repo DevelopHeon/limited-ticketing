@@ -9,6 +9,7 @@ import com.example.limitedticketing.purchasewaiting.domain.exception.Reservation
 import com.example.limitedticketing.purchasewaiting.domain.model.ReservationQueueEntry;
 import com.example.limitedticketing.purchasewaiting.domain.model.ReservationQueueStatus;
 import java.util.OptionalLong;
+import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,6 +27,17 @@ public class ReservationQueueQueryService {
         this.reservationQueueStore = reservationQueueStore;
     }
 
+    private OptionalLong findPosition(Long saleProductId, UUID entryId) {
+        try {
+            return reservationQueueStore.findPosition(saleProductId, entryId);
+        } catch (ReservationQueueException exception) {
+            if (!"QUEUE_UNAVAILABLE".equals(exception.getCode())) {
+                throw exception;
+            }
+            return OptionalLong.empty();
+        }
+    }
+
     @Transactional(readOnly = true)
     public ReservationQueueEntryDetailResult find(FindReservationQueueEntryQuery query) {
         ReservationQueueEntry entry = reservationQueueEntryFinder.getRequired(query.queueEntryId());
@@ -34,7 +46,7 @@ public class ReservationQueueQueryService {
         }
 
         OptionalLong position = entry.getStatus() == ReservationQueueStatus.WAITING
-            ? reservationQueueStore.findPosition(entry.getSaleProductId(), entry.getId())
+            ? findPosition(entry.getSaleProductId(), entry.getId())
             : OptionalLong.empty();
 
         return ReservationQueueEntryDetailResult.from(

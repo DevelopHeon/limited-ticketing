@@ -56,7 +56,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Testcontainers
 @SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("test")
+@ActiveProfiles({"test", "baseline"})
 @Import(FixedClockConfiguration.class)
 @DisplayName("결제 흐름과 구매 및 재고 정합성 통합 검증")
 class PaymentLifecycleIntegrationTest {

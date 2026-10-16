@@ -13,6 +13,8 @@ import com.example.limitedticketing.purchasewaiting.domain.repository.Idempotent
 import com.example.limitedticketing.purchasewaiting.domain.repository.ReservationQueueEntryRepository;
 import com.example.limitedticketing.sale.application.port.in.SaleProductPurchaseFacade;
 import com.example.limitedticketing.sale.application.port.in.dto.FindPurchasableSaleProductInput;
+import com.example.limitedticketing.purchasewaiting.application.port.out.ReservationQueueAdmissionGuard;
+import org.springframework.beans.factory.annotation.Value;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import org.slf4j.Logger;
@@ -34,6 +36,8 @@ public class ReservationQueueCommandService {
     private final QueueSequenceGenerator queueSequenceGenerator;
     private final ReservationQueueStore reservationQueueStore;
     private final Clock clock;
+    private final ReservationQueueAdmissionGuard admissionGuard;
+    private final int maxOutstanding;
 
     public ReservationQueueCommandService(
         MemberPurchaseEligibilityFacade memberPurchaseEligibilityFacade,
@@ -42,7 +46,9 @@ public class ReservationQueueCommandService {
         QueueEntryIdGenerator queueEntryIdGenerator,
         QueueSequenceGenerator queueSequenceGenerator,
         ReservationQueueStore reservationQueueStore,
-        Clock clock
+        Clock clock,
+        ReservationQueueAdmissionGuard admissionGuard,
+        @Value("${limited-ticketing.queue.admission.max-outstanding:10000}") int maxOutstanding
     ) {
         this.memberPurchaseEligibilityFacade = memberPurchaseEligibilityFacade;
         this.saleProductPurchaseFacade = saleProductPurchaseFacade;
@@ -51,6 +57,11 @@ public class ReservationQueueCommandService {
         this.queueSequenceGenerator = queueSequenceGenerator;
         this.reservationQueueStore = reservationQueueStore;
         this.clock = clock;
+        this.admissionGuard = admissionGuard;
+        if (maxOutstanding < 1) {
+            throw new IllegalArgumentException("Queue capacity must be positive");
+        }
+        this.maxOutstanding = maxOutstanding;
     }
 
     @Transactional
@@ -67,6 +78,17 @@ public class ReservationQueueCommandService {
         LocalDateTime requestedAt = LocalDateTime.now(clock);
         memberPurchaseEligibilityFacade.ensurePurchasable(new EnsureMemberPurchasableInput(command.memberId()));
         saleProductPurchaseFacade.findPurchasable(new FindPurchasableSaleProductInput(command.saleProductId(), requestedAt));
+
+        reservationQueueEntryRepository.lockQueue(command.saleProductId());
+        ReservationQueueEntry concurrentRetry = reservationQueueEntryRepository.findByMemberIdAndPurchaseRequestKey(
+            command.memberId(), command.purchaseRequestKey()).orElse(null);
+        if (concurrentRetry != null) {
+            return resultOf(concurrentRetry, command.saleProductId());
+        }
+        admissionGuard.check(command.memberId(), command.saleProductId());
+        if (reservationQueueEntryRepository.countActive(command.saleProductId()) >= maxOutstanding) {
+            throw ReservationQueueException.capacityExceeded();
+        }
 
         ReservationQueueEntry entry = ReservationQueueEntry.enqueue(
             queueEntryIdGenerator.generate(),

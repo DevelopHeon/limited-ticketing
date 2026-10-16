@@ -51,7 +51,7 @@ import org.springframework.test.web.servlet.MvcResult;
 @Testcontainers
 @SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("test")
+@ActiveProfiles({"test", "baseline"})
 @Import({PurchaseReservationIntegrationTest.EventTestConfiguration.class, FixedClockConfiguration.class})
 @DisplayName("구매 예약과 취소 및 만료 통합 검증")
 class PurchaseReservationIntegrationTest {

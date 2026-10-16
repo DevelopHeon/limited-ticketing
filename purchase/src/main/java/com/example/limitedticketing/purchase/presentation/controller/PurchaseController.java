@@ -6,6 +6,7 @@ import com.example.limitedticketing.purchase.application.port.in.dto.ReservePurc
 import com.example.limitedticketing.purchase.presentation.response.PurchaseReservationResponse;
 import com.example.limitedticketing.shared.api.ApiResponse;
 import java.net.URI;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+@Profile("baseline")
 @RestController
 @RequestMapping("/api/sale-products")
 public class PurchaseController {

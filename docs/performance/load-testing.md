@@ -21,7 +21,7 @@ cd "$(git rev-parse --show-toplevel)"
 ```bash
 test -f .env || cp .env.example .env
 ./gradlew :app:bootJar
-SPRING_PROFILES_ACTIVE=local \
+SPRING_PROFILES_ACTIVE=local,baseline \
 java -Xms256m -Xmx768m -jar app/build/libs/app-0.0.1-SNAPSHOT.jar
 ```
 
@@ -29,6 +29,7 @@ java -Xms256m -Xmx768m -jar app/build/libs/app-0.0.1-SNAPSHOT.jar
 
 ```bash
 export DATABASE_URL='postgresql://limited_ticketing:limited_ticketing@localhost:5432/limited_ticketing'
+export SPRING_PROFILES_ACTIVE='local,baseline'
 export BASELINE_JVM_OPTIONS='-Xms256m -Xmx768m'
 export COMPOSE_PROJECT_NAME='limited-ticketing'
 export PROMETHEUS_URL='http://localhost:9090'
@@ -39,6 +40,8 @@ python3 load-test/k6/run-baseline.py --flow waiting --scenario smoke --base-url 
 요구 도구는 Python 3(Mac/Linux), k6, psql, Docker CLI와 Node.js(계약 테스트용)다. Prometheus는 `http://localhost:9090`, Grafana는 `http://localhost:3000`이며 Grafana 사용자는 admin, 최초 암호는 개발 안내의 로컬 비밀 파일에서 확인한다. 지표는 local/test 관리자 header로만 scrape한다. 관측 판정은 base URL의 로컬 포트를 `host.docker.internal:<port>`와 대조하고, 해당 flow URI의 HTTP counter 증가를 확인한다. warmup 뒤 5초 scrape 대기와 측정 전 5초 표본을 포함한다.
 
 기존 DB의 활성 대기·결제 대기 구매가 있으면 측정을 거부한다. 해당 요청의 소유권과 상태를 확인해 정상 처리한 뒤 실행하며, 측정을 위해 기존 데이터를 일괄 삭제하지 않는다. 기존 환경에서 얻은 새 결과는 별도 환경에서 수집한 과거 1단계 결과와 조건을 구분한다.
+
+직접 flow는 `baseline` profile이 필요하다. 대기 flow만 실행하면 기본 `local`을 사용한다. 평가 도구의 profile·Worker·풀 환경 변수는 실제 앱 기동 설정과 일치시킨다.
 
 ### 시나리오와 판정
 
@@ -355,3 +358,19 @@ docker compose exec -T redis redis-cli ZCARD "processing:sale:$SALE_PRODUCT_ID"
 ## 측정 결과 관리
 
 실행별 결과는 [평가 기록](../evaluations/load-testing/2026-10-15-existing-results.md)에 조건·원본 식별자·한계와 함께 남긴다. 기존 결과를 덮어쓰지 않는다. 다음 측정과 완료 기준은 [로드맵](../plans/roadmap.md)을 따른다.
+
+
+## 단계별 평가 크기와 ZSET 단독 실험
+
+매 단계 5,000건 요청을 반복하지 않는다. 기능·장애 회귀와 10건 Smoke를 기본으로 한다. 처리 경로 성능을 비교할 때 1,000건 반복 또는 5,000건을 선택하고, 최종 종합 평가에서는 계획한 집중·분산·조회 부하를 수행한다. 작은 Smoke는 5,000명 목표 달성 근거가 아니다.
+
+실제 운영 claim Lua의 크기·batch 비용은 별도 실험한다. 앱을 중지한 시간에 기존 Redis를 사용하며 다른 EVAL이 겹치면 표본을 거부한다. 5,000 ZSET member는 5,000 HTTP 요청을 뜻하지 않는다.
+
+```bash
+REDIS_CONTAINER_ID=$(docker compose ps -q redis)
+python3 load-test/k6/zset-claim.py --redis-container "$REDIS_CONTAINER_ID" --samples 20
+```
+
+도구는 `lab:<runId>:*` 키만 생성·정리하고 실제 [claim Lua](../../purchasewaiting/src/main/resources/redis/queue-claim.lua)를 읽는다. 1,000/5,000/10,000 member와 batch 1/10/50/100에서 각 5회 warmup 후 20회 측정한다. `INFO commandstats`의 EVAL usec 증가분으로 서버 명령 비용을 기록한다. TIME은 Lua 내부에서 고정되므로 두 TIME 호출의 차이는 사용하지 않는다. reset·Docker CLI·네트워크는 timed EVAL 밖이다. 매 표본의 이동 수·원래 수 복원·실험 키 제거를 assert로 확인한다.
+
+이는 warm Redis 단독 실험이며 DB·예약·HTTP 완료 시간과 다르다. 서버 명령 비용은 호스트 경합에도 영향을 받으며 작은 표본으로 성능 보장을 하지 않는다. 실행별 CSV·메모리·script SHA와 manifest를 Git 제외 `results/`에 보존한다. [2단계 평가](../evaluations/load-testing/2026-10-16-stage-2-queue-consistency.md)에 실제 값과 잘못된 초기 계측을 함께 기록한다.

@@ -36,3 +36,7 @@ Kafka·Outbox는 [도입 조건](../plans/roadmap.md#메시징-확장-판단-기
 - [Redis Store](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/infrastructure/redis/RedisReservationQueueStore.java), [Recovery Service](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/command/service/ReservationQueueRecoveryService.java): claim·복구 구현.
 - [대기열 통합 테스트](../../app/src/test/java/com/example/limitedticketing/integration/purchasewaiting/ReservationQueueIntegrationTest.java): 실제 DB·Redis의 멱등성·상태 전이·복구 검증.
 - [기존 평가 기록](../evaluations/load-testing/2026-10-15-existing-results.md): 원본에서 확인한 수치와 비교 한계.
+
+## 후속 변경 · 2026-10-16
+
+[ADR 0006](0006-durable-queue-admission-and-attempts.md)에서 Redis INCR 순번을 PostgreSQL로 이전하고 시도 토큰·lease·입구/전역 상한을 적용했다. 위 Redis 순번 유실과 전역 실행 제한 설명은 최초 결정 당시의 비용이며 현재 계약은 구매 대기 설계를 따른다.

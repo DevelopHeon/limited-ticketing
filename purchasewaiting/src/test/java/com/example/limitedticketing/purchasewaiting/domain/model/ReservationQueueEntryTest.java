@@ -17,6 +17,14 @@ class ReservationQueueEntryTest {
     private static final LocalDateTime REQUESTED_AT = LocalDateTime.of(2026, 10, 15, 12, 0);
 
     @Test
+    @DisplayName("ZSET score가 구분할 수 없는 순번은 대기 원장에 생성하지 않는다")
+    void rejectsSequenceOutsideExactRedisIntegerRange() {
+        assertThatThrownBy(() -> ReservationQueueEntry.enqueue(
+            UUID.randomUUID(), 1L, 2L, "precision", 9_007_199_254_740_992L, REQUESTED_AT
+        )).isInstanceOf(ReservationQueueException.class);
+    }
+
+    @Test
     @DisplayName("대기 요청은 처리 대상으로 가져온 뒤에만 구매 예약을 완료할 수 있다")
     void waitingRequestMustBeClaimedBeforeItCanComplete() {
         ReservationQueueEntry entry = waitingEntry();
@@ -26,7 +34,7 @@ class ReservationQueueEntryTest {
         assertThat(entry.getStatus()).isEqualTo(ReservationQueueStatus.WAITING);
         assertThat(entry.getPurchaseId()).isNull();
 
-        entry.beginProcessing(REQUESTED_AT.plusSeconds(1));
+        entry.beginProcessing(UUID.randomUUID(), REQUESTED_AT.plusSeconds(1), REQUESTED_AT.plusSeconds(1).plusSeconds(30));
         entry.completeReservation(10L, REQUESTED_AT.plusSeconds(2));
 
         assertThat(entry.getStatus()).isEqualTo(ReservationQueueStatus.RESERVED);
@@ -39,9 +47,9 @@ class ReservationQueueEntryTest {
     void claimedRequestCannotBeClaimedAgain() {
         ReservationQueueEntry entry = waitingEntry();
         LocalDateTime claimedAt = REQUESTED_AT.plusSeconds(1);
-        entry.beginProcessing(claimedAt);
+        entry.beginProcessing(UUID.randomUUID(), claimedAt, claimedAt.plusSeconds(30));
 
-        assertThatThrownBy(() -> entry.beginProcessing(claimedAt.plusSeconds(1)))
+        assertThatThrownBy(() -> entry.beginProcessing(UUID.randomUUID(), claimedAt.plusSeconds(1), claimedAt.plusSeconds(1).plusSeconds(30)))
             .isInstanceOf(ReservationQueueException.class);
         assertThat(entry.getProcessingStartedAt()).isEqualTo(claimedAt);
     }
@@ -51,7 +59,7 @@ class ReservationQueueEntryTest {
     void recoveredRequestKeepsItsIdentityAndOriginalSequence() {
         ReservationQueueEntry entry = waitingEntry();
         UUID originalId = entry.getId();
-        entry.beginProcessing(REQUESTED_AT.plusSeconds(1));
+        entry.beginProcessing(UUID.randomUUID(), REQUESTED_AT.plusSeconds(1), REQUESTED_AT.plusSeconds(1).plusSeconds(30));
 
         entry.returnToWaiting();
 
@@ -61,7 +69,7 @@ class ReservationQueueEntryTest {
         assertThat(entry.getPurchaseRequestKey()).isEqualTo("purchase-1");
         assertThat(entry.getProcessingStartedAt()).isNull();
 
-        entry.beginProcessing(REQUESTED_AT.plusMinutes(1));
+        entry.beginProcessing(UUID.randomUUID(), REQUESTED_AT.plusMinutes(1), REQUESTED_AT.plusMinutes(1).plusSeconds(30));
         entry.completeReservation(10L, REQUESTED_AT.plusMinutes(1));
         assertThat(entry.getStatus()).isEqualTo(ReservationQueueStatus.RESERVED);
     }
@@ -71,7 +79,7 @@ class ReservationQueueEntryTest {
     @DisplayName("완료된 대기 요청은 재처리하거나 결과를 덮어쓸 수 없다")
     void completedRequestCannotBeReprocessedOrHaveItsResultOverwritten(ReservationQueueStatus status) {
         ReservationQueueEntry entry = waitingEntry();
-        entry.beginProcessing(REQUESTED_AT.plusSeconds(1));
+        entry.beginProcessing(UUID.randomUUID(), REQUESTED_AT.plusSeconds(1), REQUESTED_AT.plusSeconds(1).plusSeconds(30));
         switch (status) {
             case RESERVED -> entry.completeReservation(10L, REQUESTED_AT.plusSeconds(2));
             case SOLD_OUT -> entry.markSoldOut("INSUFFICIENT_INVENTORY", REQUESTED_AT.plusSeconds(2));
@@ -80,7 +88,7 @@ class ReservationQueueEntryTest {
         }
 
         assertThatThrownBy(entry::returnToWaiting).isInstanceOf(ReservationQueueException.class);
-        assertThatThrownBy(() -> entry.beginProcessing(REQUESTED_AT.plusSeconds(3)))
+        assertThatThrownBy(() -> entry.beginProcessing(UUID.randomUUID(), REQUESTED_AT.plusSeconds(3), REQUESTED_AT.plusSeconds(3).plusSeconds(30)))
             .isInstanceOf(ReservationQueueException.class);
         assertThatThrownBy(() -> entry.completeReservation(20L, REQUESTED_AT.plusSeconds(3)))
             .isInstanceOf(ReservationQueueException.class);
@@ -93,6 +101,20 @@ class ReservationQueueEntryTest {
             assertThat(entry.getFailureCode())
                 .isEqualTo(status == ReservationQueueStatus.SOLD_OUT ? "INSUFFICIENT_INVENTORY" : "SALE_UNAVAILABLE");
         }
+    }
+
+    @Test
+    @DisplayName("복구 후 재처리 시 이전 시도 토큰의 처리 권한은 유지되지 않는다")
+    void recoveryInvalidatesThePreviousAttempt() {
+        ReservationQueueEntry entry = waitingEntry();
+        UUID oldToken = UUID.randomUUID();
+        UUID newToken = UUID.randomUUID();
+        entry.beginProcessing(oldToken, REQUESTED_AT, REQUESTED_AT.plusSeconds(30));
+        entry.returnToWaiting();
+        entry.beginProcessing(newToken, REQUESTED_AT.plusSeconds(40), REQUESTED_AT.plusSeconds(70));
+        assertThat(entry.ownsAttempt(oldToken)).isFalse();
+        assertThat(entry.ownsAttempt(newToken)).isTrue();
+        assertThat(entry.getQueueSequence()).isEqualTo(42);
     }
 
     private ReservationQueueEntry waitingEntry() {

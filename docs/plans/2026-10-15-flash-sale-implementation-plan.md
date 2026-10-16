@@ -118,7 +118,7 @@ flowchart TD
 1. 사용자가 특정 단계의 시작을 요청하면 현재 HEAD·작업 트리와 직전 단계 commit·보고서·미완료 항목을 확인한다.
 2. 위 표의 논의 사항 중 동작·계약·비용·실험 해석을 바꾸는 미결정 항목을 먼저 논의한다. 합의 전 의존하는 구현을 시작하지 않는다. 이미 합의한 사항은 반복 질문하지 않는다.
 3. 해당 단계 스펙을 확정하고 그 단계만 구현한다. 한국어 `@DisplayName`, 업무 분기/부수효과 테스트, 기존 아키텍처·코드 규칙을 유지한다.
-4. `./gradlew check`와 단계 인수 검증을 실행한다. 실패를 숨기거나 기준을 낮추지 않는다. 성능 목표 미달은 정확성과 구분해 기록한다.
+4. `./gradlew check`와 단계 인수 검증을 실행한다. 일반 단계는 단위·통합·Smoke로 검증하고 5,000건 부하는 성능 비교가 필요한 변경과 최종 종합 평가에 집중한다. 실패를 숨기거나 기준을 낮추지 않는다. 성능 목표 미달은 정확성과 구분해 기록한다.
 5. 현재 계약·실행 절차·중요 ADR·평가를 갱신한다. 구현되지 않은 내용을 현재 아키텍처에 완료 상태로 반영하지 않는다.
 6. 변경 범위를 확인해 한국어로 commit/push한다. 비 fast-forward나 권한 오류는 원인을 보고하고 force push로 우회하지 않는다. push 성공과 원격 commit을 확인한다.
 7. 변경·검증·실측·한계·학습 질문·다음 단계 논의 목록을 인계하고 **검토 대기에서 종료**한다. 성공적인 push나 리뷰 완료만으로 다음 단계가 자동 승인된 것으로 간주하지 않는다. 사용자가 다음 단계 시작을 명확히 요청하면 이미 합의한 범위를 유지하고 필요한 논의부터 진행한다.
@@ -205,3 +205,32 @@ flowchart TD
 ## 8. 다음 단계에서 확인할 질문
 
 1단계 시작 시 장비/컨테이너 자원 상한과 도구 버전, 기준선 실행 환경을 먼저 확인한다. 1단계 결과를 받은 뒤 2단계의 순번 내구성·lease/fencing·복구 커서·과부하 정책을 논의한다. 이후 단계의 상세 인터페이스를 지금 추정해 코드로 만들지 않는다.
+
+## 9. 2단계 실행 계획 · 2026-10-16
+
+스펙: [대기 정합성과 입구 보호](../archive/specs/2026-10-16-stage-2-queue-consistency.md). 실행 방식은 기존처럼 직접 구현·최종 전체 리뷰 1회다. 기존 master와 로컬 환경에서 작업한다.
+
+### Task 2.1 · 입력 어댑터와 실행 버퍼 분리
+
+- [x] `LayeringArchitectureTests`에 Scheduled 메서드의 presentation 위치 검사를 추가하고 기존 두 Scheduler에서 실패를 확인한다.
+- [x] `ReservationQueueWorker`의 조율을 `application/command/service/ReservationQueueDispatchService`로 이동한다. `presentation/scheduler/ReservationQueueScheduler`는 `application/port/in/worker/ReservationQueueWorkerFacade`만 호출한다.
+- [x] 구매 만료 Scheduler도 presentation으로 이동하고 내부 `PurchaseExpirationFacade`를 사용한다.
+- [x] 출력 `ReservationQueueTaskExecutor`와 infrastructure 구현으로 전역 실행 가능 수만 dispatch하고 큐 버퍼를 없앤다. 실행 거부는 재대기한다.
+- [x] `./gradlew :app:test --tests '*LayeringArchitectureTests' --tests '*ModularityTests'`와 기존 대기/구매 테스트를 통과시킨다.
+
+### Task 2.2 · 순번·claim·복구·입구 보호
+
+- [x] Redis 유실 순번·동점 cursor·동시 claim·구 토큰·실행 중 lease 복구·수용량·429/503·직접 HTTP 차단을 실제 DB/Redis/HTTP 테스트로 먼저 재현한다.
+- [x] 새 Flyway migration으로 상품별 순번 원장과 처리 토큰/lease, 복구 index를 추가한다. 기존 migration은 수정하지 않는다.
+- [x] `QueueSequenceGenerator`의 PostgreSQL 구현, 상품별 정책 잠금과 조건부 claim, 행 잠금+토큰 기반 처리/복구를 구현한다.
+- [x] Redis claim/release/requeue/복원 Lua를 module resource에 두고 운영 코드와 실험 도구가 같은 원본을 사용하게 한다.
+- [x] 신규 진입 rate guard·수용량 10,000·429/503·Retry-After를 구현한다. 같은 키의 멱등 응답은 먼저 반환한다.
+- [x] 직접 Controller는 baseline profile에서만 활성화하고 테스트의 비교 경로는 profile을 명시한다.
+- [x] 각 실패 테스트의 GREEN과 `./gradlew check`, 부하 도구·관측 비밀값 테스트를 확인한다.
+
+### Task 2.3 · 실험과 단계 종료
+
+- [x] 기존 환경에서 작은 Smoke와 실제 Lua의 크기/배치 실험을 수행한다. 실패 원본도 보존한다. 사용자 요청에 따라 단계마다 5,000건 부하를 반복하지 않으며 성능 비교와 최종 종합 평가에서만 필요에 맞춰 실행한다.
+- [x] HTTP 접수·결과 완료·처리 실행·연결/락 대기·ZSET 비용을 구분하고 한계와 미달을 보고한다.
+- [x] 현재 API·복구·계층·실행 문서와 ADR, 평가·로드맵을 갱신한다. 최종 전체 리뷰의 중요 문제는 회귀 테스트로 수정한다.
+- [x] 한국어 commit/push 후 원격 반영을 확인하고 2단계 검토 대기에서 종료한다.

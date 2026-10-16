@@ -92,4 +92,21 @@ Redis 대기열 테스트 데이터 생성부터 Smoke/Load 실행, Redis 관찰
 
 ## 관측과 자동 기준선
 
-Actuator의 health는 상세 내부 정보 없이 공개하고, prometheus는 local/test 관리자에게만 제공한다. 다른 Actuator 경로는 차단한다. `observability` Compose profile로 Prometheus/Grafana를 시작하며 `.env`의 Grafana 암호를 먼저 설정한다. 전용 DB·Redis·앱 실행과 평가 도구 사용은 [자동 기준선](../performance/load-testing.md#자동-기준선--현재-평가-도구)을 따른다.
+Actuator의 health는 상세 내부 정보 없이 공개하고, prometheus는 local/test 관리자에게만 제공한다. 다른 Actuator 경로는 차단한다. 기존 앱·DB·Redis와 같은 Compose project의 `observability` profile을 사용한다.
+
+Grafana 비밀번호는 `.env` 대신 Git 제외 파일 `.local/observability/secrets/grafana_admin_password`로 관리한다. 프로젝트 루트에서 비밀번호를 준비하고 관측 서비스를 실행한다.
+
+```bash
+bash scripts/setup-observability.local.sh
+docker compose --profile observability up -d prometheus grafana
+```
+
+준비 명령은 OpenSSL로 비밀번호를 생성하며 기존 파일의 값은 보존한다. 비어 있는 기존 파일은 덮어쓰지 않고 실패한다. 디렉터리는 700, 파일은 600 권한으로 유지하며 비밀번호를 출력하지 않는다. 직접 로컬에서 파일을 확인하고 문서·터미널 기록·Git에 복사하지 않는다. 다른 위치에서 스크립트를 실행해도 비밀번호는 이 프로젝트 안에 준비된다.
+
+`secret-init`이 Docker secret을 컨테이너 전용 `grafana-credentials` 볼륨에 복사하고 Grafana UID 472·파일 권한 600을 적용한다. Grafana는 해당 볼륨을 읽기 전용으로 마운트하고 [파일 기반 비밀번호 설정](https://grafana.com/docs/grafana/latest/setup-grafana/configure-docker/)으로 읽는다. 호스트 파일 권한을 낮추지 않고 Linux의 UID 차이를 처리한다. 기본 profile의 PostgreSQL·Redis 실행에는 비밀번호 준비가 필요하지 않다.
+
+Grafana는 `http://localhost:3000`, 사용자는 `admin`이며 최초 비밀번호는 위 파일에 있다. Prometheus는 `http://localhost:9090`이다. `.env`는 포트·scrape 대상 등 비밀이 아닌 관측 설정을 맡고, 기존 `GRAFANA_ADMIN_PASSWORD` 변수는 사용하지 않는다. 기존 `.env`는 덮어쓰지 않는다.
+
+이미 `grafana-data`에 관리자 계정이 초기화되어 있으면 파일을 바꿔도 기존 계정 비밀번호는 자동 변경되지 않는다. 기존 암호를 계속 사용하고, 변경이 필요하면 로그인 후 계정 설정에서 변경한다. 비밀번호를 맞추려고 데이터 볼륨을 삭제하지 않는다. 최초 설정 파일과 변경한 계정 암호가 서로 다를 수 있으므로 기존 계정의 변경 이력을 함께 확인한다.
+
+평가 도구 사용은 [자동 기준선](../performance/load-testing.md#자동-기준선--현재-평가-도구)을 따른다.

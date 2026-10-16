@@ -33,6 +33,6 @@ PostgreSQL은 named volume을 사용한다. Redis에는 영속 볼륨·AOF·복�
 
 ## 관측 구성과 과거 측정 환경
 
-`observability` profile은 Prometheus v3.15.0과 Grafana 13.2.4를 추가한다. 관측 UI는 localhost에 공개하며 지표는 관리자 header로 scrape한다. `APP_METRICS_TARGET`으로 호스트 앱 주소를 지정한다. Grafana datasource·대시보드는 소스에서 자동 provisioning하고 데이터 볼륨을 유지한다.
+`observability` profile은 Prometheus v3.15.0과 Grafana 13.2.4를 추가한다. 관측 UI는 localhost에 공개하며 지표는 관리자 header로 scrape한다. `APP_METRICS_TARGET`으로 호스트 앱 주소를 지정한다. Grafana datasource·대시보드는 소스에서 자동 provisioning하고 데이터 볼륨을 유지한다. Grafana 비밀번호는 Git 제외 파일에서 Docker secret으로 전달한다. 일회성 `secret-init`이 UID 472·권한 600으로 전용 볼륨에 준비하고 Grafana는 읽기 전용으로 마운트한다. 준비·기동·기존 계정의 암호 처리는 [개발 안내](../development/README.md#관측과-자동-기준선)를 따른다.
 
 1단계 실험은 기본 실행과 별도의 Compose project `limited-ticketing-baseline`과 앱 18081·DB 15432·Redis 16379를 사용했다. `compose.baseline.yaml`이 DB/Redis 자원 제한을 추가하며 앱 JVM은 호스트에서 256~768MB로 실행했다. 이 조건은 [과거 실측](../evaluations/load-testing/2026-10-15-stage-1-baseline.md#환경과-방법)의 기록이다. 이후 작업과 측정은 [기존 로컬 환경](../performance/load-testing.md#기존-로컬-환경-준비)을 사용하며 별도 앱·DB·Redis를 생성하지 않는다. 과거 측정 포트를 현재 실행의 기본값으로 사용하지 않는다.

@@ -16,11 +16,10 @@ cd "$(git rev-parse --show-toplevel)"
 
 기존 `limited-ticketing` checkout의 `master`에서 작업하고 기존 앱·PostgreSQL·Redis를 사용한다. 이 부하 도구 실행을 위해 별도 worktree·Compose project·앱 프로세스·DB·Redis를 만들지 않는다. 기본 연결은 앱 8081·PostgreSQL 5432·Redis 6379이며, 이미 실행 중인 서비스는 그대로 사용한다. 아래 기동 명령은 앱이 실행 중이지 않을 때 사용한다.
 
-`.env`가 없으면 `.env.example`을 복사하고 관측 서비스를 시작하기 전에 `GRAFANA_ADMIN_PASSWORD`를 설정한다. 기존 `.env`는 덮어쓰지 않는다. `.env`는 Git 제외 파일이다.
+관측 비밀번호 준비와 Prometheus·Grafana 기동은 [개발 안내](../development/README.md#관측과-자동-기준선)를 먼저 따른다. 비밀번호는 Git 제외 비밀 파일로 관리한다. `.env`가 없으면 `.env.example`을 복사하며 기존 `.env`는 덮어쓰지 않는다.
 
 ```bash
 test -f .env || cp .env.example .env
-docker compose --profile observability up -d
 ./gradlew :app:bootJar
 SPRING_PROFILES_ACTIVE=local \
 java -Xms256m -Xmx768m -jar app/build/libs/app-0.0.1-SNAPSHOT.jar
@@ -37,7 +36,7 @@ python3 load-test/k6/run-baseline.py --flow direct --scenario smoke --base-url h
 python3 load-test/k6/run-baseline.py --flow waiting --scenario smoke --base-url http://localhost:8081
 ```
 
-요구 도구는 Python 3(Mac/Linux), k6, psql, Docker CLI와 Node.js(계약 테스트용)다. Prometheus는 `http://localhost:9090`, Grafana는 `http://localhost:3000`이며 Grafana 사용자는 admin, 암호는 로컬 환경 파일의 값이다. 지표는 local/test 관리자 header로만 scrape한다. 관측 판정은 base URL의 로컬 포트를 `host.docker.internal:<port>`와 대조하고, 해당 flow URI의 HTTP counter 증가를 확인한다. warmup 뒤 5초 scrape 대기와 측정 전 5초 표본을 포함한다.
+요구 도구는 Python 3(Mac/Linux), k6, psql, Docker CLI와 Node.js(계약 테스트용)다. Prometheus는 `http://localhost:9090`, Grafana는 `http://localhost:3000`이며 Grafana 사용자는 admin, 최초 암호는 개발 안내의 로컬 비밀 파일에서 확인한다. 지표는 local/test 관리자 header로만 scrape한다. 관측 판정은 base URL의 로컬 포트를 `host.docker.internal:<port>`와 대조하고, 해당 flow URI의 HTTP counter 증가를 확인한다. warmup 뒤 5초 scrape 대기와 측정 전 5초 표본을 포함한다.
 
 기존 DB의 활성 대기·결제 대기 구매가 있으면 측정을 거부한다. 해당 요청의 소유권과 상태를 확인해 정상 처리한 뒤 실행하며, 측정을 위해 기존 데이터를 일괄 삭제하지 않는다. 기존 환경에서 얻은 새 결과는 별도 환경에서 수집한 과거 1단계 결과와 조건을 구분한다.
 
@@ -72,7 +71,7 @@ HTTP p95 목표안은 500ms, waiting 최종 결과 p95 목표안은 60초다. �
 | SQL | 포함 | 테스트 데이터와 정합성 검증 조건을 버전 관리 |
 | 평가 보고서·실행 문서·관측 설정 | 포함 | 결과 해석과 실행 조건을 공유 |
 | `results/`의 JSON·CSV·로그 | 제외 | 실행마다 생성되는 측정 원본을 로컬 보존 |
-| `.env` | 제외 | 로컬 연결 정보와 비밀 설정 |
+| `.env`·`.local/observability/secrets/` | 제외 | 로컬 환경 설정·Grafana 비밀번호 |
 
 도구는 서버의 실행 코드에 포함되지 않지만, 같은 commit의 업무 코드와 측정 방법을 함께 재현하기 위해 버전 관리한다. 보고서만 남기면 부하·정확성 판정 조건을 복구할 수 없다.
 

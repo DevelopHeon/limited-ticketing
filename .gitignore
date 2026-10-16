@@ -25,3 +25,6 @@ load-test/k6/results/
 
 # Python evaluation tooling
 __pycache__/
+
+# Local observability credentials
+.local/observability/secrets/

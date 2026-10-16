@@ -51,3 +51,11 @@ node --test load-test/k6/baseline-contract.test.mjs
 ```
 
 전체 Java 규칙·아키텍처·업무 테스트는 기존처럼 `./gradlew check`로 실행한다.
+
+## 관측 비밀값 준비 검사
+
+실제 임시 디렉터리에서 비밀번호 최초 생성·기존 값 보존·700/600 권한·출력 비노출·빈 파일 거부를 검사한다. Docker 기동·로그인·컨테이너 UID 접근은 실제 관측 서비스로 별도 확인한다.
+
+```bash
+python3 -m unittest discover -s observability/tests -p test_setup.py
+```

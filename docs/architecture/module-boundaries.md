@@ -44,7 +44,7 @@ limited-ticketing
 | `inventory` | `Inventory` | 가용, 예약, 판매 수량의 원자적 전이 | `sale`, `purchase`, `payment` |
 | `purchase` | `Purchase`, `PurchaseStatus` | 구매 예약, 취소, 만료, 완료와 구매 멱등성 | `payment`, `purchasewaiting` |
 | `payment` | `Payment`, `PaymentStatus` | 결제 시도 이력과 승인/실패 처리 | HTTP API |
-| `purchasewaiting` | `ReservationQueueEntry`, `ReservationQueueStatus` | 구매 대기 접수, 순번, 처리 결과와 복구 | HTTP API |
+| `purchasewaiting` | `PurchaseWaitingEntry`, `PurchaseWaitingStatus` | 구매 대기 접수, 순번, 처리 결과와 복구 | HTTP API |
 | `app` | - | 실행 모듈, DataSource/Flyway/Redis/Security/전역 예외 조립 | 전체 |
 
 모듈 간 Aggregate 참조는 객체 그래프가 아니라 식별자로 표현한다. 예를 들어 `Purchase`는 `memberId`, `saleProductId`만 보관하며 `Member`, `SaleProduct` 엔티티를 직접 참조하지 않는다.
@@ -87,11 +87,11 @@ package com.example.limitedticketing.member.application.port.in;
 
 다른 모듈을 호출할 때는 대상 모듈의 `application.port.in` Facade와 `application.port.in.dto`만 참조한다. 대상 모듈의 Domain 모델, JPA Entity, Spring Data Repository, 내부 Command/Query Service는 직접 참조하지 않는다.
 
-Scheduler는 presentation에서 내부 입력 Facade를 호출한다. 입력·출력의 배치 기준은 [ADR 0005](../adr/0005-inbound-outbound-adapters.md)를 따른다. 아래 구조는 현재 구현 기준이다.
+purchasewaiting 이외 모듈의 Scheduler는 presentation에서 내부 입력 Facade를 호출한다. 입력·출력의 배치 기준은 [ADR 0005](../adr/0005-inbound-outbound-adapters.md)를 따른다. 아래 구조는 현재 구현 기준이다.
 
 ## 레이어 구조
 
-모든 도메인 모듈은 아래 구조를 기본으로 사용한다. 필요한 코드가 없으면 패키지를 미리 만들지 않는다.
+purchasewaiting 이외의 모듈은 아래 구조를 사용한다. purchasewaiting의 새 구조는 [구매 대기 설계](purchase-waiting.md#portadapter-구조)를 따른다. 필요한 코드가 없으면 패키지를 미리 만들지 않는다.
 
 ```text
 purchase
@@ -239,7 +239,7 @@ Aggregate 상태 변경
 
 ## 구매 대기와 실제 구매의 경계
 
-`purchasewaiting`은 구매 대기 접수, 순번, 처리 결과와 복구를 소유한다. Worker는 `purchase`의 공개 Facade로 실제 구매 예약을 실행하며, 구매와 재고의 최종 정합성은 PostgreSQL 트랜잭션이 보호한다.
+`purchasewaiting`은 구매 대기 접수, 순번, 처리 결과와 복구를 소유한다. Worker는 UseCase → Service → PurchaseReservationPort → PurchaseModuleAdapter를 통해 `purchase`의 공개 Facade로 실제 구매 예약을 실행하며, 구매와 재고의 최종 정합성은 PostgreSQL 트랜잭션이 보호한다.
 
 Redis ZSET은 대기 순서와 처리 슬롯을 제공한다. API 계약, DB 상태, Redis 키와 장애 복구 절차는 [구매 대기 설계](purchase-waiting.md)를 따른다. 직접 예약 HTTP는 `baseline` profile에서만 기준선 측정 경로로 제공한다.
 
@@ -249,3 +249,10 @@ Redis ZSET은 대기 순서와 처리 슬롯을 제공한다. API 계약, DB 상
 - 모듈 간 공개 API와 순환 의존: [ModularityTests](../../app/src/test/java/com/example/limitedticketing/architecture/ModularityTests.java)
 - 코드 규칙과 테스트 배치: [개발 및 검증](../development/testing.md#자동-검증)
 - 메시징 도입 조건: [로드맵](../plans/roadmap.md#메시징-확장-판단-기준)
+
+
+## purchasewaiting의 구조 전환
+
+purchasewaiting은 [ADR 0007](../adr/0007-purchasewaiting-ports-and-adapters.md)에 따라 Port/UseCase/Adapter 구조를 먼저 적용했다. 다른 모듈은 기존 Facade 구조다. Input Port와 공개 DTO는 기존 Named Interface `api`로 노출하고, Worker Port·UseCase·Service·Output Port·Domain·Adapter는 다른 모듈에 공개하지 않는다.
+
+기존 LayeringArchitectureTests는 사용자의 명시적 지시로 그대로 유지하며 새 구조와의 충돌을 과도기 실패로 보고한다. 이는 검사 완료가 아니며, 모든 모듈 전환 후 의존 방향 정책을 함께 개정한다. Modulith와 Checkstyle은 계속 검증한다.

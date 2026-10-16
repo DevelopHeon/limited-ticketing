@@ -42,3 +42,7 @@
 ZSET의 입장 선택과 Kafka 작업 전달은 역할을 구분한다. 입장 DB 상태와 Outbox를 같은 트랜잭션으로 저장하고, Consumer의 DB 처리와 offset 저장 경계는 멱등성과 복구로 보호하는 방향이다. 정확한 상태·event·retry 계약은 3단계 스펙을 확정한 후 구현한다.
 
 SSE/WebSocket 알림, 실제 PG·운영 인증, PostgreSQL 자동 failover는 별도 후속 후보로 유지한다. 현재 단일 DB 구조에 Saga·서비스별 DB 분리를 선행 도입하지 않는다.
+
+## 2단계 이후 구조 학습 작업
+
+purchasewaiting만 [Port/Adapter 전환 기록](../archive/specs/2026-10-16-purchasewaiting-hexagonal-transition.md)에 따라 먼저 변경했다. 기존 LayeringArchitectureTests는 사용자 지시로 다른 모듈 전환 후 개정한다. 다음 검토 대상은 이 모듈의 구조이며 다른 모듈 전환과 Kafka 3단계는 별도 요청 이후 진행한다.

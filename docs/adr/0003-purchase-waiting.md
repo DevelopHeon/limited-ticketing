@@ -32,9 +32,9 @@ Kafka·Outbox는 [도입 조건](../plans/roadmap.md#메시징-확장-판단-기
 ## 근거와 검증
 
 - [구현 스펙 원문](../archive/specs/2026-10-15-purchase-waiting-implementation.md): 당시 범위·선택 배경·복구 문제 기록.
-- [purchasewaiting 메타데이터](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/package-info.java), [공개 Facade](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/port/in/ReservationQueueFacade.java): 업무 경계.
-- [Redis Store](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/infrastructure/redis/RedisReservationQueueStore.java), [Recovery Service](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/command/service/ReservationQueueRecoveryService.java): claim·복구 구현.
-- [대기열 통합 테스트](../../app/src/test/java/com/example/limitedticketing/integration/purchasewaiting/ReservationQueueIntegrationTest.java): 실제 DB·Redis의 멱등성·상태 전이·복구 검증.
+- [purchasewaiting 메타데이터](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/package-info.java), [공개 Facade](https://github.com/DevelopHeon/limited-ticketing/blob/a04cc26a1e4243246e31f3343f1a7190016c8630/purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/port/in/ReservationQueueFacade.java): 업무 경계.
+- [Redis Store](https://github.com/DevelopHeon/limited-ticketing/blob/a04cc26a1e4243246e31f3343f1a7190016c8630/purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/infrastructure/redis/RedisReservationQueueStore.java), [Recovery Service](https://github.com/DevelopHeon/limited-ticketing/blob/a04cc26a1e4243246e31f3343f1a7190016c8630/purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/command/service/ReservationQueueRecoveryService.java): claim·복구 구현.
+- [대기열 통합 테스트](https://github.com/DevelopHeon/limited-ticketing/blob/a04cc26a1e4243246e31f3343f1a7190016c8630/app/src/test/java/com/example/limitedticketing/integration/purchasewaiting/ReservationQueueIntegrationTest.java): 실제 DB·Redis의 멱등성·상태 전이·복구 검증.
 - [기존 평가 기록](../evaluations/load-testing/2026-10-15-existing-results.md): 원본에서 확인한 수치와 비교 한계.
 
 ## 후속 변경 · 2026-10-16

@@ -26,6 +26,10 @@ HTTP·메시지·스케줄 입력이 동일한 업무 유스케이스를 사용�
 
 ## 근거
 
-- [현재 Scheduler](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/presentation/scheduler/ReservationQueueScheduler.java)
+- [현재 Scheduler](https://github.com/DevelopHeon/limited-ticketing/blob/a04cc26a1e4243246e31f3343f1a7190016c8630/purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/presentation/scheduler/ReservationQueueScheduler.java)
 - [현재 ArchUnit 검사](../../app/src/test/java/com/example/limitedticketing/architecture/LayeringArchitectureTests.java)
 - [구현 단계](../plans/2026-10-15-flash-sale-implementation-plan.md#5-단계별-산출물과-검토-지점)
+
+## 후속 결정 · 2026-10-16
+
+[ADR 0007](0007-purchasewaiting-ports-and-adapters.md)에 따라 purchasewaiting은 입력 Adapter도 infrastructure/adapter/in에 배치하고 Input Port → Driving Adapter → UseCase → Service 흐름으로 전환한다. 다른 모듈의 presentation 배치는 아직 유지한다. 위 내용은 최초 결정과 2단계 적용 당시의 기록이다.

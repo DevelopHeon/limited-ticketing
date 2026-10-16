@@ -14,4 +14,6 @@ ADR 0001–0004는 **2026-10-15에 기존 구현과 문서를 근거로 회고 �
 
 | [0006](0006-durable-queue-admission-and-attempts.md) | Accepted | DB 순번·입구 상한·시도 토큰·lease와 실행 슬롯 보호 |
 
+| [0007](0007-purchasewaiting-ports-and-adapters.md) | Accepted · purchasewaiting 우선 | 입력·출력 Adapter를 infrastructure에 배치하고 Port/UseCase/Service 이름 통일 |
+
 진행 중인 도입 후보는 [로드맵](../plans/roadmap.md)에 둔다. Kafka·Outbox·서비스 분리는 현재 채택된 결정으로 기록하지 않는다. 완료 스펙 원문은 [보관본](../archive/specs/2026-10-15-purchase-waiting-implementation.md)에서 확인한다.

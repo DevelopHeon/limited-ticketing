@@ -12,6 +12,8 @@
 | `plans/` | [구현 계획](plans/2026-10-15-flash-sale-implementation-plan.md) | 전체 학습 범위·단계·검토 규칙, [현재 상태](plans/roadmap.md) |
 | `archive/` | [구매 대기 구현 스펙 보관본](archive/specs/2026-10-15-purchase-waiting-implementation.md) | 원문과 당시 상태 보존, [1단계 보관 스펙](archive/specs/2026-10-15-stage-1-observability-baseline.md), [2단계 보관 스펙](archive/specs/2026-10-16-stage-2-queue-consistency.md) |
 
+현재 purchasewaiting은 [Port/Adapter 구조](architecture/purchase-waiting.md#portadapter-구조)로 우선 전환했다. [완료 기록](archive/specs/2026-10-16-purchasewaiting-hexagonal-transition.md)과 [과도기 검사](development/testing.md#purchasewaiting-구조-전환-중-검사)를 함께 읽는다.
+
 ## 단계 작업의 진입점
 
 [구현 계획](plans/2026-10-15-flash-sale-implementation-plan.md)의 단계 실행 규칙과 해당 단계 스펙을 먼저 읽는다. 단계별 검증·한국어 commit/push·인계 후 검토 대기하며 다음 단계를 자동 실행하지 않는다. 다음 단계 시작 요청 때 미결정 계약은 논의 후 확정한다.

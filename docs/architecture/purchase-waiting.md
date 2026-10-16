@@ -1,6 +1,6 @@
 # 구매 대기 계약과 처리 흐름
 
-`purchasewaiting`은 구매 진입 요청의 수명 주기를 소유한다. PostgreSQL은 요청·순번·처리 권한의 원장, Redis ZSET은 입장 선택과 위치 조회를 위한 재구성 가능한 저장소다. 실제 구매·재고 예약은 `purchase` 공개 API에 위임한다. 선택 이유와 비용은 [ADR 0006](../adr/0006-durable-queue-admission-and-attempts.md)에 기록한다.
+`purchasewaiting`은 구매 진입 요청의 수명 주기를 소유한다. PostgreSQL은 요청·순번·처리 권한의 원장, Redis ZSET은 입장 선택과 위치 조회를 위한 재구성 가능한 저장소다. 실제 구매·재고 예약은 PurchaseReservationPort와 PurchaseModuleAdapter를 거쳐 `purchase` 공개 계약에 위임한다. 선택 이유와 비용은 [ADR 0006](../adr/0006-durable-queue-admission-and-attempts.md)에 기록한다.
 
 ## 접수와 조회
 
@@ -31,21 +31,23 @@ flowchart TB
     client["HTTP Client"]
     subgraph app["Spring Boot 애플리케이션 · 하나의 프로세스"]
         subgraph waiting["purchasewaiting 모듈"]
-            http["Controller<br/>공개 Facade"]
-            command["Command / Query Service<br/>접수·멱등성<br/>상태 조회"]
-            worker["presentation Scheduler<br/>내부 Facade → dispatch"]
-            process["Claim Service<br/>Processing Service<br/>Completion Service"]
+            http["입력 Adapter<br/>Controller → Input Port<br/>Driving Adapter"]
+            command["UseCase → Service<br/>접수·멱등성·상태 조회"]
+            worker["입력 Adapter<br/>Scheduler → Worker Port<br/>Driving Adapter"]
+            process["Claim / Process UseCase<br/>Service와 Domain 규칙"]
             recovery["Recovery Service"]
-            adapters["DB Repository / Redis 어댑터"]
+            adapters["Output Port<br/>Persistence / Redis Adapter"]
             http --> command
             command --> adapters
             worker -->|"claim과 예약 처리 위임"| process
             worker -->|"주기적 복구"| recovery
             process --> adapters
             recovery --> adapters
+            purchaseAdapter["PurchaseReservationPort<br/>PurchaseModuleAdapter"]
+            process -->|"실제 구매 예약"| purchaseAdapter
         end
-        purchase["purchase 공개 API<br/>PurchaseCommandFacade"]
-        process -->|"실제 구매 예약"| purchase
+        purchase["purchase 모듈 공개 계약"]
+        purchaseAdapter --> purchase
     end
     client -->|"접수·상태 조회 HTTP"| http
     db[("PostgreSQL")]
@@ -55,13 +57,13 @@ flowchart TB
     purchase -->|"구매·재고 트랜잭션"| db
 ```
 
-이 그림은 구매 대기 처리에서 독립적으로 바뀌는 책임만 묶어 보여 준다. 각 컴포넌트는 프로세스나 배포 단위가 아니다. 실제 구현의 기준은 [Scheduler](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/presentation/scheduler/ReservationQueueScheduler.java)와 [Application Service](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/command/service)다. Repository·출력 Port의 의존 방향은 [모듈 내부 설계](module-boundaries.md#레이어-구조)를 따른다.
+이 그림은 구매 대기 처리에서 독립적으로 바뀌는 책임만 묶어 보여 준다. 각 컴포넌트는 프로세스나 배포 단위가 아니다. 실제 구현의 기준은 [Scheduler](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/infrastructure/adapter/in/scheduler/PurchaseWaitingScheduler.java)와 [Application Service](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/service)다. Repository·출력 Port의 의존 방향은 [모듈 내부 설계](module-boundaries.md#레이어-구조)를 따른다.
 
 ## 처리 흐름
 
 1. 기존 요청 키면 원장을 반환한다. 구매 자격을 확인하고 상품별 DB advisory transaction lock 아래 동시 재전송·속도·수용량을 판정한다.
 2. DB 순번을 발급해 WAITING을 저장한다. 커밋 후 Redis에 등록한다.
-3. presentation Scheduler → 내부 Worker Facade → Application dispatch가 실행 여유를 확인한다. 상품 선택 시작점을 순환한다.
+3. 입력 Scheduler → Worker Port → Driving Adapter → Dispatch UseCase/Service가 실행 여유를 확인한다. 상품 선택 시작점을 순환한다.
 4. [claim Lua](../../purchasewaiting/src/main/resources/redis/queue-claim.lua)가 등록된 대기 중 앞 순번을 processing으로 옮기고 토큰을 기록한다.
 5. DB 상품 잠금·처리 수 상한 확인 후 `status=WAITING` 조건부 갱신으로 토큰·lease를 저장한다. 실행 거부는 해당 토큰의 권한만 반환하고 원래 순번으로 재대기한다.
 6. 실제 처리는 행 잠금 아래 상태·토큰·lease를 확인한다. `REQUIRES_NEW` 예약이 성공하면 RESERVED, 품절은 SOLD_OUT, 다른 업무 실패는 FAILED로 확정한다. 시스템 오류는 PROCESSING을 유지한다.
@@ -84,3 +86,69 @@ V6 적용 전 이전 앱 Worker를 중지한다. 기존 마지막 순번은 원�
 Worker 10개가 결과 확정까지 외부 연결을 유지하며 내부 예약에도 연결을 사용하므로 기본 Hikari 풀은 30이다. 환경 설정과 연결 여유 조건은 [개발 안내](../development/README.md)를 따른다. 실행 중인 긴 트랜잭션은 lease만으로 강제 회수하지 않는다.
 
 [업무·아키텍처 테스트 기준](../development/testing.md)과 [2단계 평가](../evaluations/load-testing/2026-10-16-stage-2-queue-consistency.md)에 검증 범위와 한계를 기록한다.
+
+
+## Port/Adapter 구조
+
+업무 명칭은 PurchaseWaiting으로 통일했다. [ADR 0007](../adr/0007-purchasewaiting-ports-and-adapters.md)의 학습 목적에 따라 입력·출력 어댑터를 모두 infrastructure에 둔다. purchasewaiting만 전환했으며 다른 모듈의 Facade를 여기서 변경하지 않았다.
+
+```text
+purchasewaiting/
+├── application/
+│   ├── port/in/                 Input Port와 외부 Input/Output DTO
+│   │   └── worker/              모듈 내부 Worker Port
+│   ├── port/out/                외부 기능 계약과 작업 DTO
+│   ├── usecase/                 업무 interface와 Command/Query/Result
+│   └── service/                 UseCase 구현·트랜잭션
+├── domain/model/                PurchaseWaitingEntry·PurchaseWaitingStatus
+├── domain/exception/            PurchaseWaitingException
+└── infrastructure/adapter/
+    ├── in/                      Driving Adapter
+    │   ├── web/                 Controller·HTTP Response
+    │   └── scheduler/           Scheduler
+    └── out/                     Driven Adapter
+        ├── persistence/         JPA Entity·Repository·DB 순번
+        ├── redis/               대기·복구·입구 제한
+        ├── module/              Member/Sale/Purchase 공개 계약 연결
+        ├── execution/           제한된 ThreadPool
+        └── id/                  UUID 발급
+```
+
+### 호출과 책임
+
+```text
+HTTP Controller → PurchaseWaitingCommandPort → PurchaseWaitingCommandAdapter
+ → EnqueuePurchaseWaitingUseCase → EnqueuePurchaseWaitingService
+ → Entry Query/Command Port → PurchaseWaitingPersistenceAdapter
+
+Scheduler → PurchaseWaitingWorkerPort → PurchaseWaitingWorkerAdapter
+ → Dispatch/Recover UseCase → Service → Output Port → Adapter
+
+Process Service → ReserveWaitingPurchaseUseCase → ReserveWaitingPurchaseService
+ → PurchaseReservationPort → PurchaseModuleAdapter → purchase의 기존 Facade
+```
+
+Driving Adapter는 입력 변환과 UseCase 조합을 수행한다. 접수 Adapter는 enqueue에서 UUID를 받은 뒤 find UseCase를 호출한다. 전체를 하나의 transaction으로 감싸지 않아 기존 접수 커밋 후 조회 경계를 유지한다. Service 사이의 호출도 UseCase interface로 한다.
+
+Process Service가 처리 행 잠금·토큰/lease 확인·예약 결과 분류·Domain 전이·결과 저장을 맡으며 별도 Completion Service는 없다. Reserve Service의 REQUIRES_NEW와 Restore Service의 별도 transaction은 유지한다. Recovery의 만료 조회·커밋 후 Redis 보충·현재 WAITING 재확인도 유지한다.
+
+Finder/Support는 없다. 데이터 조회는 Entry Query Port, 소유권을 확인한 업무 조회는 Find UseCase, 상태 규칙은 Domain이 담당한다. 잠금 조회는 이름에 Query가 있어도 read-only transaction으로 바꾸지 않는다.
+
+의존성 필드·생성자 매개변수·테스트 의존성 변수는 타입의 역할 접미사를 유지한다. 예: `purchaseWaitingCommandPort`, `findPurchaseWaitingUseCase`, `purchaseWaitingJpaRepository`, `processPurchaseWaitingService`. 다른 모듈의 기존 Facade를 받는 변수도 `purchaseCommandFacade`처럼 명명한다.
+
+### DTO 경계
+
+| 위치 | 계약 |
+|---|---|
+| `port.in.dto` | Enqueue/Find Input, PurchaseWaitingOutput. Domain과 HTTP에 의존하지 않음 |
+| `usecase.dto.command` | 접수·claim·처리·예약의 내부 업무 입력 |
+| `usecase.dto.query` | 회원 소유권을 포함한 상태 조회 입력 |
+| `usecase.dto.result` | PurchaseWaitingResult. 기존 두 단계 Result를 합침 |
+| `port.out.dto` | PurchaseWaitingClaim, PurchaseWaitingInsertResult |
+| `adapter.in.web.response` | PurchaseWaitingResponse. 기존 JSON 필드 유지 |
+
+내부 DTO의 waitingEntryId는 HTTP Response의 queueEntryId로 변환한다. URL·응답 필드·오류 코드·DB 이름·Redis 키·Lua·환경 변수는 바꾸지 않았다. Input Port와 DTO만 Modulith의 공개 api Named Interface이고 Worker Port는 내부 하위 패키지다.
+
+### 과도기 검증
+
+기존 LayeringArchitectureTests는 다른 모듈 전환 후 개정하라는 사용자 지시로 수정하지 않았다. Scheduler의 presentation 고정 정책에서 1건, 옛 presentation 및 application.command/query/support 패키지가 비어 생기는 검사에서 2건 실패한다. 정확한 실패와 나머지 검증 결과는 [테스트 기준](../development/testing.md#purchasewaiting-구조-전환-중-검사)을 따른다. 전체 검사가 통과했다고 표현하지 않는다.

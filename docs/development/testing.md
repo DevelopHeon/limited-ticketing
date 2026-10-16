@@ -21,9 +21,9 @@
 | `PaymentLifecycleIntegrationTest` | 결제 실패·재시도·승인, 소유권·만료와 구매 및 재고 전이 검증 |
 | `SaleProductManagementIntegrationTest` | 판매 생성, 상태 전이, 재고 생성, 목록/상세 조회 검증 |
 | `ObservabilityIntegrationTest` | 실제 HTTP의 지표 접근 401/403/200, 업무 API 인증 유지, histogram·JVM·Hikari 노출 검증 |
-| `ReservationQueueIntegrationTest` | 실제 DB/Redis에서 순번 유실·동점 cursor·단일 claim·이전 토큰·실행 중 lease 복구·전역 슬롯·실행 거부·커밋 후 등록 실패·전체 Worker 연결 검증 |
+| `PurchaseWaitingIntegrationTest` | 실제 DB/Redis에서 순번 유실·동점 cursor·단일 claim·이전 토큰·실행 중 lease 복구·전역 슬롯·실행 거부·커밋 후 등록 실패·전체 Worker 연결 검증 |
 
-`ReservationQueueProtectionIntegrationTest`는 동시 수용량·동시 멱등 재전송·1초 속도 제한·Redis 장애 전후·기본 직접 HTTP 차단을 검증한다. 기존 직접 예약 HTTP·결제 통합 테스트는 `test,baseline`으로 기존 예약 계약을 검증한다. `ReservationQueueExecutorTest`는 실행 초과의 즉시 거부와 내부 버퍼 0을 확인한다.
+`PurchaseWaitingProtectionIntegrationTest`는 동시 수용량·동시 멱등 재전송·1초 속도 제한·Redis 장애 전후·기본 직접 HTTP 차단을 검증한다. 기존 직접 예약 HTTP·결제 통합 테스트는 `test,baseline`으로 기존 예약 계약을 검증한다. `PurchaseWaitingExecutorTest`는 실행 초과의 즉시 거부와 내부 버퍼 0을 확인한다.
 
 `ModularityDocumentationTests`는 Spring Modulith `Documenter`로 코드 기준의 모듈 문서를 생성한다.
 
@@ -63,3 +63,17 @@ python3 -m unittest discover -s observability/tests -p test_setup.py
 ```
 
 매 단계 5,000건 부하를 반복하지 않는다. 기능·장애 회귀와 작은 Smoke를 기본으로 하고 처리 경로 성능 비교가 필요하거나 최종 종합 평가일 때 대규모 부하를 수행한다. ZSET 단독 실험은 실제 HTTP 처리량 평가와 구분한다.
+
+
+## purchasewaiting 구조 전환 중 검사
+
+purchasewaiting은 Port → Driving Adapter → UseCase → Service → Output Port → Adapter 구조로 먼저 전환했다. 다른 모듈은 기존 구조이며 사용자는 기존 LayeringArchitectureTests를 모든 모듈 전환 뒤 변경하도록 명시했다. 이 테스트를 삭제·수정·비활성화하거나 build 검사 범위를 완화하지 않는다.
+
+`./gradlew check --continue`로 모든 검사와 테스트를 실행하고 이 클래스의 과도기 실패와 실제 회귀를 구분한다. Checkstyle·Modulith·업무 단위/통합 테스트의 실패는 허용하지 않는다. 전체 check 실패를 성공으로 보고하지 않는다. 실제 결과는 구조 전환 계획의 완료 기록과 Notion 작업 기록에 남긴다.
+
+테스트 이름·import·입력 Command는 새 계약에 맞췄으며 기존 재고 수량·복구·토큰·연결·입구 제한 assert를 유지했다. Redis 장애 중 수락한 동일 키의 재전송도 202와 같은 원장을 반환하는지 변경 전후에 검증한다.
+
+
+### 이번 전환의 검증 결과
+
+`./gradlew check --continue`에서 LayeringArchitectureTests의 36개 중 3개가 실패했다. Scheduler의 presentation 위치 고정 1개와 옛 presentation·application.command/query/support 패키지를 대상으로 한 empty selection 2개다. 테스트 파일과 검사 설정은 변경하지 않았다. 나머지 업무·통합·동시성·Modulith·Checkstyle 검증은 통과했다.

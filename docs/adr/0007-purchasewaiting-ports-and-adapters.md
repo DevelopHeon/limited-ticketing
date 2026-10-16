@@ -1,6 +1,6 @@
 # ADR 0007 · purchasewaiting의 Port/Adapter와 UseCase 명명 통일
 
-- 상태: **Accepted · purchasewaiting에 우선 적용**
+- 상태: **Partially Superseded · 입력 Adapter의 업무 조합은 ADR 0008로 대체**
 - 결정일: 2026-10-16. 사용자는 실용적 최소 추상화보다 헥사고날+DDD의 역할과 호출 흐름을 일관되게 학습하는 것을 우선했다.
 - [ADR 0005](0005-inbound-outbound-adapters.md)의 presentation 입력 배치는 purchasewaiting에 한해 이 결정으로 대체한다. 다른 모듈은 아직 기존 구조다.
 
@@ -31,3 +31,7 @@ Facade·공개 API·Support Finder·Store 이름이 섞여 업무 흐름을 따�
 - [현재 구매 대기 구조와 계약](../architecture/purchase-waiting.md)
 - [실행 계획과 사용자 승인 범위](../archive/specs/2026-10-16-purchasewaiting-hexagonal-transition.md)
 - [테스트와 과도기 검사 상태](../development/testing.md)
+
+## 후속 결정
+
+[ADR 0008](0008-application-entry-orchestration.md)은 Controller·Scheduler의 infrastructure 배치를 유지하면서 별도 입력 Adapter의 업무 조합·Port 구현을 Application Facade/진입 Service로 옮긴다. 위 내용은 최초 전환 당시의 결정과 비용으로 보존한다. Port/UseCase 구분, DTO·출력 경계와 역할 접미사 규칙은 유지한다.

@@ -12,7 +12,7 @@
 | `plans/` | [구현 계획](plans/2026-10-15-flash-sale-implementation-plan.md) | 전체 학습 범위·단계·검토 규칙, [현재 상태](plans/roadmap.md) |
 | `archive/` | [구매 대기 구현 스펙 보관본](archive/specs/2026-10-15-purchase-waiting-implementation.md) | 원문과 당시 상태 보존, [1단계 보관 스펙](archive/specs/2026-10-15-stage-1-observability-baseline.md), [2단계 보관 스펙](archive/specs/2026-10-16-stage-2-queue-consistency.md) |
 
-현재 purchasewaiting은 [Port/Adapter 구조](architecture/purchase-waiting.md#portadapter-구조)로 우선 전환했다. [완료 기록](archive/specs/2026-10-16-purchasewaiting-hexagonal-transition.md)과 [과도기 검사](development/testing.md#purchasewaiting-구조-전환-중-검사)를 함께 읽는다.
+현재 purchasewaiting은 [Port/Adapter 구조](architecture/purchase-waiting.md#portadapter-구조)로 우선 전환했다. 업무 조합과 입력 Adapter 책임은 [ADR 0008](adr/0008-application-entry-orchestration.md)을 따른다. [최초 전환 기록](archive/specs/2026-10-16-purchasewaiting-hexagonal-transition.md)과 [과도기 검사](development/testing.md#purchasewaiting-구조-전환-중-검사)를 함께 읽는다.
 
 ## 단계 작업의 진입점
 

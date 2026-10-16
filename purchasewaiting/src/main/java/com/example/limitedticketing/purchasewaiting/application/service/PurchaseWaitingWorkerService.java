@@ -1,17 +1,17 @@
-package com.example.limitedticketing.purchasewaiting.infrastructure.adapter.in;
+package com.example.limitedticketing.purchasewaiting.application.service;
 
 import com.example.limitedticketing.purchasewaiting.application.port.in.worker.PurchaseWaitingWorkerPort;
 import com.example.limitedticketing.purchasewaiting.application.usecase.DispatchPurchaseWaitingUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.RecoverPurchaseWaitingUseCase;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 
-@Component
-public class PurchaseWaitingWorkerAdapter implements PurchaseWaitingWorkerPort {
+@Service
+public class PurchaseWaitingWorkerService implements PurchaseWaitingWorkerPort {
 
     private final DispatchPurchaseWaitingUseCase dispatchPurchaseWaitingUseCase;
     private final RecoverPurchaseWaitingUseCase recoverPurchaseWaitingUseCase;
 
-    public PurchaseWaitingWorkerAdapter(
+    public PurchaseWaitingWorkerService(
         DispatchPurchaseWaitingUseCase dispatchPurchaseWaitingUseCase,
         RecoverPurchaseWaitingUseCase recoverPurchaseWaitingUseCase
     ) {

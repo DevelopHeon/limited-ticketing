@@ -253,6 +253,6 @@ Redis ZSET은 대기 순서와 처리 슬롯을 제공한다. API 계약, DB 상
 
 ## purchasewaiting의 구조 전환
 
-purchasewaiting은 [ADR 0007](../adr/0007-purchasewaiting-ports-and-adapters.md)에 따라 Port/UseCase/Adapter 구조를 먼저 적용했다. 다른 모듈은 기존 Facade 구조다. Input Port와 공개 DTO는 기존 Named Interface `api`로 노출하고, Worker Port·UseCase·Service·Output Port·Domain·Adapter는 다른 모듈에 공개하지 않는다.
+purchasewaiting은 [ADR 0007](../adr/0007-purchasewaiting-ports-and-adapters.md)의 infrastructure 입력·출력 배치를 유지하고 [ADR 0008](../adr/0008-application-entry-orchestration.md)에 따라 Controller·Scheduler가 Input Adapter 역할을 맡는다. Input Port는 Application Facade 또는 진입 Service가 구현하며 내부 업무 실행은 UseCase로 연결한다. 다른 모듈은 기존 Facade 구조다. Input Port와 공개 DTO는 기존 Named Interface `api`로 노출하고, Worker Port·Facade 구현·UseCase·Service·Output Port·Domain·Adapter는 다른 모듈에 공개하지 않는다.
 
 기존 LayeringArchitectureTests는 사용자의 명시적 지시로 그대로 유지하며 새 구조와의 충돌을 과도기 실패로 보고한다. 이는 검사 완료가 아니며, 모든 모듈 전환 후 의존 방향 정책을 함께 개정한다. Modulith와 Checkstyle은 계속 검증한다.

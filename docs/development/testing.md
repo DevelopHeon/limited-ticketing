@@ -67,7 +67,7 @@ python3 -m unittest discover -s observability/tests -p test_setup.py
 
 ## purchasewaiting 구조 전환 중 검사
 
-purchasewaiting은 Port → Driving Adapter → UseCase → Service → Output Port → Adapter 구조로 먼저 전환했다. 다른 모듈은 기존 구조이며 사용자는 기존 LayeringArchitectureTests를 모든 모듈 전환 뒤 변경하도록 명시했다. 이 테스트를 삭제·수정·비활성화하거나 build 검사 범위를 완화하지 않는다.
+purchasewaiting은 Controller·Scheduler(Input Adapter) → Input Port → Application Facade/진입 Service → 내부 UseCase → Service → Output Port → Adapter 구조다. 다른 모듈은 기존 구조이며 사용자는 기존 LayeringArchitectureTests를 모든 모듈 전환 뒤 변경하도록 명시했다. 이 테스트를 삭제·수정·비활성화하거나 build 검사 범위를 완화하지 않는다.
 
 `./gradlew check --continue`로 모든 검사와 테스트를 실행하고 이 클래스의 과도기 실패와 실제 회귀를 구분한다. Checkstyle·Modulith·업무 단위/통합 테스트의 실패는 허용하지 않는다. 전체 check 실패를 성공으로 보고하지 않는다. 실제 결과는 구조 전환 계획의 완료 기록과 Notion 작업 기록에 남긴다.
 
@@ -77,3 +77,5 @@ purchasewaiting은 Port → Driving Adapter → UseCase → Service → Output P
 ### 이번 전환의 검증 결과
 
 `./gradlew check --continue`에서 LayeringArchitectureTests의 36개 중 3개가 실패했다. Scheduler의 presentation 위치 고정 1개와 옛 presentation·application.command/query/support 패키지를 대상으로 한 empty selection 2개다. 테스트 파일과 검사 설정은 변경하지 않았다. 나머지 업무·통합·동시성·Modulith·Checkstyle 검증은 통과했다.
+
+접수 Facade에 전체 transaction을 추가하지 않는다. `PurchaseWaitingIntegrationTest.queuesRequestsIdempotentlyAndProcessesOnlyTheInventoryWinner`는 202 접수 응답에 Redis 등록 이후 순번 1·2가 포함되고 멱등 재전송 및 최종 예약·품절이 재고와 일치하는지 검증한다. 단순 계층 이동에는 위임 횟수나 클래스 존재만 검증하는 테스트를 추가하지 않는다.

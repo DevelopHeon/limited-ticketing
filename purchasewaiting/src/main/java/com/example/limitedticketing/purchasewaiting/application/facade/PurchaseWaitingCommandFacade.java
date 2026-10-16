@@ -1,4 +1,4 @@
-package com.example.limitedticketing.purchasewaiting.infrastructure.adapter.in;
+package com.example.limitedticketing.purchasewaiting.application.facade;
 
 import com.example.limitedticketing.purchasewaiting.application.port.in.PurchaseWaitingCommandPort;
 import com.example.limitedticketing.purchasewaiting.application.port.in.dto.EnqueuePurchaseWaitingInput;
@@ -9,15 +9,15 @@ import com.example.limitedticketing.purchasewaiting.application.usecase.dto.comm
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.query.FindPurchaseWaitingQuery;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.result.PurchaseWaitingResult;
 import java.util.UUID;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 
-@Component
-public class PurchaseWaitingCommandAdapter implements PurchaseWaitingCommandPort {
+@Service
+public class PurchaseWaitingCommandFacade implements PurchaseWaitingCommandPort {
 
     private final EnqueuePurchaseWaitingUseCase enqueuePurchaseWaitingUseCase;
     private final FindPurchaseWaitingUseCase findPurchaseWaitingUseCase;
 
-    public PurchaseWaitingCommandAdapter(
+    public PurchaseWaitingCommandFacade(
         EnqueuePurchaseWaitingUseCase enqueuePurchaseWaitingUseCase,
         FindPurchaseWaitingUseCase findPurchaseWaitingUseCase
     ) {

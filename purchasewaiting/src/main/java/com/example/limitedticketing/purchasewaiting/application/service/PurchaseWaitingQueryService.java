@@ -1,4 +1,4 @@
-package com.example.limitedticketing.purchasewaiting.infrastructure.adapter.in;
+package com.example.limitedticketing.purchasewaiting.application.service;
 
 import com.example.limitedticketing.purchasewaiting.application.port.in.PurchaseWaitingQueryPort;
 import com.example.limitedticketing.purchasewaiting.application.port.in.dto.FindPurchaseWaitingInput;
@@ -6,14 +6,14 @@ import com.example.limitedticketing.purchasewaiting.application.port.in.dto.Purc
 import com.example.limitedticketing.purchasewaiting.application.usecase.FindPurchaseWaitingUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.query.FindPurchaseWaitingQuery;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.result.PurchaseWaitingResult;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 
-@Component
-public class PurchaseWaitingQueryAdapter implements PurchaseWaitingQueryPort {
+@Service
+public class PurchaseWaitingQueryService implements PurchaseWaitingQueryPort {
 
     private final FindPurchaseWaitingUseCase findPurchaseWaitingUseCase;
 
-    public PurchaseWaitingQueryAdapter(
+    public PurchaseWaitingQueryService(
         FindPurchaseWaitingUseCase findPurchaseWaitingUseCase
     ) {
         this.findPurchaseWaitingUseCase = findPurchaseWaitingUseCase;

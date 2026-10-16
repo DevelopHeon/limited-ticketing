@@ -45,4 +45,4 @@ SSE/WebSocket 알림, 실제 PG·운영 인증, PostgreSQL 자동 failover는 �
 
 ## 2단계 이후 구조 학습 작업
 
-purchasewaiting만 [Port/Adapter 전환 기록](../archive/specs/2026-10-16-purchasewaiting-hexagonal-transition.md)에 따라 먼저 변경했다. 기존 LayeringArchitectureTests는 사용자 지시로 다른 모듈 전환 후 개정한다. 다음 검토 대상은 이 모듈의 구조이며 다른 모듈 전환과 Kafka 3단계는 별도 요청 이후 진행한다.
+purchasewaiting만 [Port/Adapter 전환 기록](../archive/specs/2026-10-16-purchasewaiting-hexagonal-transition.md)에 따라 먼저 변경했고, 이후 [ADR 0008](../adr/0008-application-entry-orchestration.md)에 따라 업무 조합을 Application Facade로 이동했다. 기존 LayeringArchitectureTests는 사용자 지시로 다른 모듈 전환 후 개정한다. 다음 검토 대상은 이 모듈의 구조이며 다른 모듈 전환과 Kafka 3단계는 별도 요청 이후 진행한다.

@@ -31,16 +31,20 @@ flowchart TB
     client["HTTP Client"]
     subgraph app["Spring Boot 애플리케이션 · 하나의 프로세스"]
         subgraph waiting["purchasewaiting 모듈"]
-            http["입력 Adapter<br/>Controller → Input Port<br/>Driving Adapter"]
+            http["Input Adapter<br/>HTTP Controller"]
+            entry["Application 진입<br/>Input Port → Facade / Service"]
             command["UseCase → Service<br/>접수·멱등성·상태 조회"]
-            worker["입력 Adapter<br/>Scheduler → Worker Port<br/>Driving Adapter"]
+            worker["Input Adapter<br/>Scheduler"]
+            workerEntry["Application 진입<br/>Worker Port → Worker Service"]
             process["Claim / Process UseCase<br/>Service와 Domain 규칙"]
             recovery["Recovery Service"]
             adapters["Output Port<br/>Persistence / Redis Adapter"]
-            http --> command
+            http --> entry
+            entry --> command
             command --> adapters
-            worker -->|"claim과 예약 처리 위임"| process
-            worker -->|"주기적 복구"| recovery
+            worker --> workerEntry
+            workerEntry -->|"claim과 예약 처리 위임"| process
+            workerEntry -->|"주기적 복구"| recovery
             process --> adapters
             recovery --> adapters
             purchaseAdapter["PurchaseReservationPort<br/>PurchaseModuleAdapter"]
@@ -63,7 +67,7 @@ flowchart TB
 
 1. 기존 요청 키면 원장을 반환한다. 구매 자격을 확인하고 상품별 DB advisory transaction lock 아래 동시 재전송·속도·수용량을 판정한다.
 2. DB 순번을 발급해 WAITING을 저장한다. 커밋 후 Redis에 등록한다.
-3. 입력 Scheduler → Worker Port → Driving Adapter → Dispatch UseCase/Service가 실행 여유를 확인한다. 상품 선택 시작점을 순환한다.
+3. 입력 Scheduler → Worker Port → Worker Service → Dispatch UseCase/Service가 실행 여유를 확인한다. 상품 선택 시작점을 순환한다.
 4. [claim Lua](../../purchasewaiting/src/main/resources/redis/queue-claim.lua)가 등록된 대기 중 앞 순번을 processing으로 옮기고 토큰을 기록한다.
 5. DB 상품 잠금·처리 수 상한 확인 후 `status=WAITING` 조건부 갱신으로 토큰·lease를 저장한다. 실행 거부는 해당 토큰의 권한만 반환하고 원래 순번으로 재대기한다.
 6. 실제 처리는 행 잠금 아래 상태·토큰·lease를 확인한다. `REQUIRES_NEW` 예약이 성공하면 RESERVED, 품절은 SOLD_OUT, 다른 업무 실패는 FAILED로 확정한다. 시스템 오류는 PROCESSING을 유지한다.
@@ -90,7 +94,7 @@ Worker 10개가 결과 확정까지 외부 연결을 유지하며 내부 예약�
 
 ## Port/Adapter 구조
 
-업무 명칭은 PurchaseWaiting으로 통일했다. [ADR 0007](../adr/0007-purchasewaiting-ports-and-adapters.md)의 학습 목적에 따라 입력·출력 어댑터를 모두 infrastructure에 둔다. purchasewaiting만 전환했으며 다른 모듈의 Facade를 여기서 변경하지 않았다.
+업무 명칭은 PurchaseWaiting으로 통일했다. [ADR 0007](../adr/0007-purchasewaiting-ports-and-adapters.md)의 입력·출력 infrastructure 배치는 유지하고, [ADR 0008](../adr/0008-application-entry-orchestration.md)에 따라 Controller·Scheduler 자체를 입력 Adapter로 본다. 업무 조합과 Port 구현은 Application이 맡는다. purchasewaiting만 전환했으며 다른 모듈의 Facade를 여기서 변경하지 않았다.
 
 ```text
 purchasewaiting/
@@ -99,11 +103,12 @@ purchasewaiting/
 │   │   └── worker/              모듈 내부 Worker Port
 │   ├── port/out/                외부 기능 계약과 작업 DTO
 │   ├── usecase/                 업무 interface와 Command/Query/Result
-│   └── service/                 UseCase 구현·트랜잭션
+│   ├── facade/                  공개 Port 구현·여러 UseCase 조합
+│   └── service/                 UseCase 구현·트랜잭션, 단순 진입 Port 연결
 ├── domain/model/                PurchaseWaitingEntry·PurchaseWaitingStatus
 ├── domain/exception/            PurchaseWaitingException
 └── infrastructure/adapter/
-    ├── in/                      Driving Adapter
+    ├── in/                      Controller·Scheduler 등 Input Adapter
     │   ├── web/                 Controller·HTTP Response
     │   └── scheduler/           Scheduler
     └── out/                     Driven Adapter
@@ -117,18 +122,25 @@ purchasewaiting/
 ### 호출과 책임
 
 ```text
-HTTP Controller → PurchaseWaitingCommandPort → PurchaseWaitingCommandAdapter
+HTTP Controller → PurchaseWaitingCommandPort → PurchaseWaitingCommandFacade
  → EnqueuePurchaseWaitingUseCase → EnqueuePurchaseWaitingService
  → Entry Query/Command Port → PurchaseWaitingPersistenceAdapter
 
-Scheduler → PurchaseWaitingWorkerPort → PurchaseWaitingWorkerAdapter
+HTTP Controller → PurchaseWaitingQueryPort → PurchaseWaitingQueryService
+ → FindPurchaseWaitingUseCase → FindPurchaseWaitingService
+
+Scheduler → PurchaseWaitingWorkerPort → PurchaseWaitingWorkerService
  → Dispatch/Recover UseCase → Service → Output Port → Adapter
 
 Process Service → ReserveWaitingPurchaseUseCase → ReserveWaitingPurchaseService
  → PurchaseReservationPort → PurchaseModuleAdapter → purchase의 기존 Facade
 ```
 
-Driving Adapter는 입력 변환과 UseCase 조합을 수행한다. 접수 Adapter는 enqueue에서 UUID를 받은 뒤 find UseCase를 호출한다. 전체를 하나의 transaction으로 감싸지 않아 기존 접수 커밋 후 조회 경계를 유지한다. Service 사이의 호출도 UseCase interface로 한다.
+Controller는 HTTP 경로·헤더·인증 주체를 Input으로 변환하고 HTTP 응답을 만든다. Scheduler는 실행 주기를 맡는다. 이들은 Input Port를 호출하며 내부 UseCase나 구현 Service를 직접 참조하지 않는다.
+
+PurchaseWaitingCommandFacade가 접수 UseCase의 UUID를 받아 조회 UseCase를 호출한다. Facade 전체를 transaction으로 감싸지 않아 접수 커밋과 Redis afterCommit 반영 후 조회하는 기존 경계를 유지한다. 단순 조회와 Worker 진입은 각각 PurchaseWaitingQueryService·PurchaseWaitingWorkerService가 Port를 구현해 내부 UseCase로 연결한다. 조합이 없는 기능에 Facade를 일괄 추가하지 않는다.
+
+같은 모듈의 Application 내부 업무 호출은 UseCase interface를 사용하고, 다른 모듈과 입력 Adapter는 Input Port를 호출한다. 저장소·Redis·다른 모듈 기능을 사용하는 Application의 출력 호출은 Output Port를 사용한다. Worker Port는 Scheduler의 코어 진입 계약이며 다른 모듈에 공개하는 api는 아니다.
 
 Process Service가 처리 행 잠금·토큰/lease 확인·예약 결과 분류·Domain 전이·결과 저장을 맡으며 별도 Completion Service는 없다. Reserve Service의 REQUIRES_NEW와 Restore Service의 별도 transaction은 유지한다. Recovery의 만료 조회·커밋 후 Redis 보충·현재 WAITING 재확인도 유지한다.
 

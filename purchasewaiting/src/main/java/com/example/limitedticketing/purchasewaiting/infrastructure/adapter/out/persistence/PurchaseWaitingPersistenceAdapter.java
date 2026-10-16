@@ -1,12 +1,10 @@
 package com.example.limitedticketing.purchasewaiting.infrastructure.adapter.out.persistence;
 
-import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingEntryCommandPort;
-import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingEntryQueryPort;
-import com.example.limitedticketing.purchasewaiting.application.port.out.dto.PurchaseWaitingInsertResult;
 import com.example.limitedticketing.purchasewaiting.domain.exception.PurchaseWaitingException;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingEntry;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingStatus;
-import com.example.limitedticketing.purchasewaiting.infrastructure.adapter.out.persistence.PurchaseWaitingJpaRepository;
+import com.example.limitedticketing.purchasewaiting.domain.repository.PurchaseWaitingEntryRepository;
+import com.example.limitedticketing.purchasewaiting.domain.repository.PurchaseWaitingInsertResult;
 import com.example.limitedticketing.purchasewaiting.infrastructure.adapter.out.persistence.entity.PurchaseWaitingJpaEntity;
 import java.time.LocalDateTime;
 import java.util.Collection;
@@ -17,7 +15,7 @@ import java.util.UUID;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public class PurchaseWaitingPersistenceAdapter implements PurchaseWaitingEntryQueryPort, PurchaseWaitingEntryCommandPort {
+public class PurchaseWaitingPersistenceAdapter implements PurchaseWaitingEntryRepository {
 
     private final PurchaseWaitingJpaRepository purchaseWaitingJpaRepository;
 

@@ -22,7 +22,7 @@
 
 ## 아키텍처
 
-`app`이 모든 업무 모듈을 조립하고 하나의 Spring Boot 프로세스로 실행합니다. 모듈은 코드 소유권과 의존 방향의 경계입니다. PostgreSQL은 업무 상태를, Redis는 구매 대기 순번과 처리 슬롯을 관리합니다.
+`app`이 모든 업무 모듈을 조립하고 하나의 Spring Boot 프로세스로 실행합니다. 모듈은 코드 소유권과 의존 방향의 경계입니다. PostgreSQL은 업무 상태를, Redis는 구매 대기 순서와 처리 슬롯을 관리합니다.
 
 전체 시스템과 실행 구성은 [C4 아키텍처](docs/architecture/README.md), 코드 경계는 [모듈 설계](docs/architecture/module-boundaries.md), 현재 로컬 배치는 [Deployment](docs/architecture/deployment.md)를 참고합니다.
 
@@ -44,7 +44,7 @@
 프로젝트 루트에서 PostgreSQL과 Redis를 실행한 뒤 애플리케이션을 시작합니다.
 
 ```bash
-cp .env.example .env
+test -f .env || cp .env.example .env
 docker compose up -d
 SPRING_PROFILES_ACTIVE=local ./gradlew :app:bootRun
 ```
@@ -57,23 +57,8 @@ SPRING_PROFILES_ACTIVE=local ./gradlew :app:bootRun
 
 설정 값, 로컬 인증 헤더와 API 목록은 [개발 및 검증 가이드](docs/development/README.md)를 참고합니다.
 
-## 학습 구현 진행
+## 학습 범위와 문서
 
-**한정 상품 플래시세일**을 기준으로 Redis ZSET·Kafka·조회 캐시·인기/판매 랭킹·장애 복구·5,000명 부하 평가를 학습합니다. [전체 구현 계획](docs/plans/2026-10-15-flash-sale-implementation-plan.md)과 [1단계 스펙](docs/archive/specs/2026-10-15-stage-1-observability-baseline.md)을 검토한 뒤 단계별로 진행합니다. 각 단계는 검증·한국어 commit/push 후 검토 대기하며, 다음 단계는 별도 시작 요청과 필요한 논의 후 진행합니다. 현재 **2단계 구현·검증·리뷰 완료 후 검토 대기**입니다. [2단계 평가](docs/evaluations/load-testing/2026-10-16-stage-2-queue-consistency.md)를 확인하고 다음 단계는 별도로 시작합니다.
+한정 상품 플래시세일을 기준으로 Redis ZSET·Kafka·조회 캐시·인기/판매 랭킹·장애 복구·부하 평가를 학습한다. [현재 진행 상태와 다음 작업](docs/plans/roadmap.md), [제품 요구사항과 단계별 인수 기준](docs/plans/2026-10-15-flash-sale-implementation-plan.md)을 구분해 읽는다. 단계별 실행·리뷰·commit/push 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
 
-## 문서
-
-[문서 목차](docs/README.md)에서 목적에 맞는 문서를 선택할 수 있습니다.
-
-| 문서 | 내용 |
-|---|---|
-| [아키텍처](docs/architecture/README.md) | C4, 모듈·계층, 데이터 정합성과 구매 대기 계약 |
-| [개발 안내](docs/development/README.md) | 로컬 실행, 환경 변수와 API |
-| [테스트 기준](docs/development/testing.md) | 업무 테스트, 통합 테스트, 아키텍처·코드 규칙 검사 |
-| [ADR](docs/adr/README.md) | 주요 선택의 배경, 대안과 비용 |
-| [부하 테스트](docs/performance/load-testing.md) | 직접 예약·대기 접수 실행과 최종 상태 검증 |
-| [평가 기록](docs/evaluations/load-testing/2026-10-15-existing-results.md) | 기존 측정 수치, 원본 식별자와 해석 한계 |
-| [구현 계획](docs/plans/2026-10-15-flash-sale-implementation-plan.md) | 플래시세일 학습 범위·단계별 작업·검토 규칙 |
-| [1단계 스펙](docs/archive/specs/2026-10-15-stage-1-observability-baseline.md) | 관측·재현 가능한 기준선의 구현·인수 계약 |
-| [로드맵](docs/plans/roadmap.md) | 현재 진행 상태와 다음 단계 검토 |
-| [완료 스펙](docs/archive/specs/2026-10-15-purchase-waiting-implementation.md) | 당시 구현 계획 원문과 현재 문서 연결 |
+[문서 안내](docs/README.md)는 구조, 결정 이유, 실행·검증, 앞으로의 작업, 실험 결과를 찾는 진입점이다. README에는 단계 완료 상태나 개별 측정값을 중복 기록하지 않는다.

@@ -6,13 +6,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseReservationPort;
-import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingEntryCommandPort;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ProcessPurchaseWaitingCommand;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingEntry;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingStatus;
-import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingEntryQueryPort;
+import com.example.limitedticketing.purchasewaiting.domain.repository.PurchaseWaitingEntryRepository;
 import com.example.limitedticketing.shared.exception.DomainErrorType;
 import com.example.limitedticketing.shared.exception.DomainException;
 import java.time.Clock;
@@ -40,9 +38,7 @@ class ProcessPurchaseWaitingServiceTest {
     @Mock
     private PurchaseReservationPort purchaseReservationPort;
     @Mock
-    private PurchaseWaitingEntryQueryPort purchaseWaitingEntryQueryPort;
-    @Mock
-    private PurchaseWaitingEntryCommandPort purchaseWaitingEntryCommandPort;
+    private PurchaseWaitingEntryRepository purchaseWaitingEntryRepository;
 
     private final UUID token = UUID.randomUUID();
     private PurchaseWaitingEntry entry;
@@ -52,8 +48,8 @@ class ProcessPurchaseWaitingServiceTest {
     void createService() {
         entry = PurchaseWaitingEntry.enqueue(UUID.randomUUID(), 1L, 2L, "purchase-1", 42, NOW.minusMinutes(1));
         entry.beginProcessing(token, NOW.minusSeconds(1), NOW.plusSeconds(30));
-        when(purchaseWaitingEntryQueryPort.findByIdForUpdate(entry.getId())).thenReturn(Optional.of(entry));
-        processPurchaseWaitingService = new ProcessPurchaseWaitingService(purchaseWaitingEntryQueryPort, purchaseWaitingEntryCommandPort, new ReserveWaitingPurchaseService(purchaseReservationPort), CLOCK);
+        when(purchaseWaitingEntryRepository.findByIdForUpdate(entry.getId())).thenReturn(Optional.of(entry));
+        processPurchaseWaitingService = new ProcessPurchaseWaitingService(purchaseWaitingEntryRepository, new ReserveWaitingPurchaseService(purchaseReservationPort), CLOCK);
     }
 
     @Test
@@ -61,7 +57,7 @@ class ProcessPurchaseWaitingServiceTest {
     void staleAttemptCannotReserveOrComplete() {
         assertThat(processPurchaseWaitingService.process(new ProcessPurchaseWaitingCommand(entry.getId(), UUID.randomUUID()))).isEmpty();
         verify(purchaseReservationPort, never()).reserve(any(), any(), any());
-        verify(purchaseWaitingEntryCommandPort, never()).save(any());
+        verify(purchaseWaitingEntryRepository, never()).save(any());
         assertThat(entry.getStatus()).isEqualTo(PurchaseWaitingStatus.PROCESSING);
     }
 
@@ -79,7 +75,7 @@ class ProcessPurchaseWaitingServiceTest {
     void successfulReservationCompletesTheWaitingRequestWithItsPurchaseId() {
         when(purchaseReservationPort.reserve(1L, 2L, "purchase-1"))
             .thenReturn(10L);
-        when(purchaseWaitingEntryCommandPort.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(purchaseWaitingEntryRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         PurchaseWaitingEntry result = processPurchaseWaitingService.process(new ProcessPurchaseWaitingCommand(entry.getId(), token)).orElseThrow();
 
@@ -87,7 +83,7 @@ class ProcessPurchaseWaitingServiceTest {
         assertThat(result.getPurchaseId()).isEqualTo(10L);
         assertThat(result.getCompletedAt()).isEqualTo(NOW);
         assertThat(result.getFailureCode()).isNull();
-        verify(purchaseWaitingEntryCommandPort).save(entry);
+        verify(purchaseWaitingEntryRepository).save(entry);
     }
 
     @ParameterizedTest(name = "{displayName} [{arguments}]")
@@ -96,7 +92,7 @@ class ProcessPurchaseWaitingServiceTest {
     void businessRejectionIsRecordedWithItsOriginalFailureCode(String code, PurchaseWaitingStatus expectedStatus) {
         DomainException rejection = new DomainException(DomainErrorType.CONFLICT, code, "구매 예약 거부") { };
         when(purchaseReservationPort.reserve(any(), any(), any())).thenThrow(rejection);
-        when(purchaseWaitingEntryCommandPort.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(purchaseWaitingEntryRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         PurchaseWaitingEntry result = processPurchaseWaitingService.process(new ProcessPurchaseWaitingCommand(entry.getId(), token)).orElseThrow();
 
@@ -104,7 +100,7 @@ class ProcessPurchaseWaitingServiceTest {
         assertThat(result.getFailureCode()).isEqualTo(code);
         assertThat(result.getPurchaseId()).isNull();
         assertThat(result.getCompletedAt()).isEqualTo(NOW);
-        verify(purchaseWaitingEntryCommandPort).save(entry);
+        verify(purchaseWaitingEntryRepository).save(entry);
     }
 
     @Test
@@ -119,6 +115,6 @@ class ProcessPurchaseWaitingServiceTest {
         assertThat(entry.getCompletedAt()).isNull();
         assertThat(entry.getFailureCode()).isNull();
         assertThat(entry.getPurchaseId()).isNull();
-        verify(purchaseWaitingEntryCommandPort, never()).save(any());
+        verify(purchaseWaitingEntryRepository, never()).save(any());
     }
 }

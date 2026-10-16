@@ -29,8 +29,8 @@ Redis 대기열이 추가되어도 이 보호 장치를 유지한다. Redis 슬�
 
 ## 근거와 검증
 
-- [재고 Repository SQL](../../inventory/src/main/java/com/example/limitedticketing/inventory/infrastructure/persistence/repository/JpaInventoryRepository.java): 수량 조건부 전이.
-- [구매 Repository SQL](../../purchase/src/main/java/com/example/limitedticketing/purchase/infrastructure/persistence/repository/JpaPurchaseRepository.java), [결제 Repository SQL](../../payment/src/main/java/com/example/limitedticketing/payment/infrastructure/persistence/repository/JpaPaymentRepository.java): 허용 상태에서의 전이.
+- [재고 Repository SQL](https://github.com/DevelopHeon/limited-ticketing/blob/8f568dda02af26915745e0a28617d9978529bd1f/inventory/src/main/java/com/example/limitedticketing/inventory/infrastructure/persistence/repository/JpaInventoryRepository.java): 수량 조건부 전이.
+- [구매 Repository SQL](https://github.com/DevelopHeon/limited-ticketing/blob/8f568dda02af26915745e0a28617d9978529bd1f/purchase/src/main/java/com/example/limitedticketing/purchase/infrastructure/persistence/repository/JpaPurchaseRepository.java), [결제 Repository SQL](https://github.com/DevelopHeon/limited-ticketing/blob/8f568dda02af26915745e0a28617d9978529bd1f/payment/src/main/java/com/example/limitedticketing/payment/infrastructure/persistence/repository/JpaPaymentRepository.java): 허용 상태에서의 전이.
 - [Flyway migrations](../../app/src/main/resources/db/migration): 멱등성·활성 항목·참조 무결성 제약.
 - [PurchaseConcurrencyIntegrationTest](../../app/src/test/java/com/example/limitedticketing/integration/purchase/PurchaseConcurrencyIntegrationTest.java): 동시 예약과 재고 보존.
 - [PurchaseLifecycleConcurrencyIntegrationTest](../../app/src/test/java/com/example/limitedticketing/integration/purchase/PurchaseLifecycleConcurrencyIntegrationTest.java): 동일 구매 전이 경합과 다른 회원 재고 보호.

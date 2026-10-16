@@ -1,6 +1,6 @@
 # 구매 대기 계약과 처리 흐름
 
-`purchasewaiting`은 구매 진입 요청의 수명 주기를 소유한다. PostgreSQL은 요청·순번·처리 권한의 원장, Redis ZSET은 입장 선택과 위치 조회를 위한 재구성 가능한 저장소다. 실제 구매·재고 예약은 PurchaseReservationPort와 PurchaseModuleAdapter를 거쳐 `purchase` 공개 계약에 위임한다. 선택 이유와 비용은 [ADR 0006](../adr/0006-durable-queue-admission-and-attempts.md)에 기록한다.
+`purchasewaiting`은 구매 진입 요청의 수명 주기를 소유한다. PostgreSQL은 요청·순번·처리 권한의 원장, Redis ZSET은 입장 선택과 위치 조회를 위한 재구성 가능한 저장소다. 실제 구매·재고 예약은 PurchaseReservationPort와 PurchaseModuleAdapter를 거쳐 `purchase` 공개 Input Port에 위임한다. 선택 이유와 비용은 [ADR 0006](../adr/0006-durable-queue-admission-and-attempts.md)에 기록한다.
 
 ## 접수와 조회
 
@@ -38,7 +38,7 @@ flowchart TB
             workerEntry["Application 진입<br/>Worker Port → Worker Service"]
             process["Claim / Process UseCase<br/>Service와 Domain 규칙"]
             recovery["Recovery Service"]
-            adapters["Output Port<br/>Persistence / Redis Adapter"]
+            adapters["Domain Repository / Output Port<br/>Persistence / Redis Adapter"]
             http --> entry
             entry --> command
             command --> adapters
@@ -94,7 +94,7 @@ Worker 10개가 결과 확정까지 외부 연결을 유지하며 내부 예약�
 
 ## Port/Adapter 구조
 
-업무 명칭은 PurchaseWaiting으로 통일했다. [ADR 0007](../adr/0007-purchasewaiting-ports-and-adapters.md)의 입력·출력 infrastructure 배치는 유지하고, [ADR 0008](../adr/0008-application-entry-orchestration.md)에 따라 Controller·Scheduler 자체를 입력 Adapter로 본다. 업무 조합과 Port 구현은 Application이 맡는다. purchasewaiting만 전환했으며 다른 모듈의 Facade를 여기서 변경하지 않았다.
+업무 명칭은 PurchaseWaiting으로 통일했다. [ADR 0007](../adr/0007-purchasewaiting-ports-and-adapters.md)의 입력·출력 infrastructure 배치는 유지하고, [ADR 0008](../adr/0008-application-entry-orchestration.md)에 따라 Controller·Scheduler 자체를 입력 Adapter로 본다. 업무 조합과 Port 구현은 Application이 맡는다. 다른 모듈도 동일한 입력·업무·출력 책임을 사용한다.
 
 ```text
 purchasewaiting/
@@ -107,6 +107,7 @@ purchasewaiting/
 │   └── service/                 UseCase 구현·트랜잭션, 단순 진입 Port 연결
 ├── domain/model/                PurchaseWaitingEntry·PurchaseWaitingStatus
 ├── domain/exception/            PurchaseWaitingException
+├── domain/repository/           PurchaseWaitingEntryRepository·저장 결과
 └── infrastructure/adapter/
     ├── in/                      Controller·Scheduler 등 Input Adapter
     │   ├── web/                 Controller·HTTP Response
@@ -124,7 +125,7 @@ purchasewaiting/
 ```text
 HTTP Controller → PurchaseWaitingCommandPort → PurchaseWaitingCommandFacade
  → EnqueuePurchaseWaitingUseCase → EnqueuePurchaseWaitingService
- → Entry Query/Command Port → PurchaseWaitingPersistenceAdapter
+ → Domain Repository → PurchaseWaitingPersistenceAdapter
 
 HTTP Controller → PurchaseWaitingQueryPort → PurchaseWaitingQueryService
  → FindPurchaseWaitingUseCase → FindPurchaseWaitingService
@@ -133,20 +134,20 @@ Scheduler → PurchaseWaitingWorkerPort → PurchaseWaitingWorkerService
  → Dispatch/Recover UseCase → Service → Output Port → Adapter
 
 Process Service → ReserveWaitingPurchaseUseCase → ReserveWaitingPurchaseService
- → PurchaseReservationPort → PurchaseModuleAdapter → purchase의 기존 Facade
+ → PurchaseReservationPort → PurchaseModuleAdapter → purchase의 Input Port
 ```
 
 Controller는 HTTP 경로·헤더·인증 주체를 Input으로 변환하고 HTTP 응답을 만든다. Scheduler는 실행 주기를 맡는다. 이들은 Input Port를 호출하며 내부 UseCase나 구현 Service를 직접 참조하지 않는다.
 
 PurchaseWaitingCommandFacade가 접수 UseCase의 UUID를 받아 조회 UseCase를 호출한다. Facade 전체를 transaction으로 감싸지 않아 접수 커밋과 Redis afterCommit 반영 후 조회하는 기존 경계를 유지한다. 단순 조회와 Worker 진입은 각각 PurchaseWaitingQueryService·PurchaseWaitingWorkerService가 Port를 구현해 내부 UseCase로 연결한다. 조합이 없는 기능에 Facade를 일괄 추가하지 않는다.
 
-같은 모듈의 Application 내부 업무 호출은 UseCase interface를 사용하고, 다른 모듈과 입력 Adapter는 Input Port를 호출한다. 저장소·Redis·다른 모듈 기능을 사용하는 Application의 출력 호출은 Output Port를 사용한다. Worker Port는 Scheduler의 코어 진입 계약이며 다른 모듈에 공개하는 api는 아니다.
+같은 모듈의 Application 내부 업무 호출은 UseCase interface를 사용하고, 다른 모듈과 입력 Adapter는 Input Port를 호출한다. Aggregate 저장소 호출은 Domain Repository를, Redis·다른 모듈 기능 등 Application의 외부 기능 호출은 Output Port를 사용한다. Worker Port는 Scheduler의 코어 진입 계약이며 다른 모듈에 공개하는 api는 아니다.
 
 Process Service가 처리 행 잠금·토큰/lease 확인·예약 결과 분류·Domain 전이·결과 저장을 맡으며 별도 Completion Service는 없다. Reserve Service의 REQUIRES_NEW와 Restore Service의 별도 transaction은 유지한다. Recovery의 만료 조회·커밋 후 Redis 보충·현재 WAITING 재확인도 유지한다.
 
-Finder/Support는 없다. 데이터 조회는 Entry Query Port, 소유권을 확인한 업무 조회는 Find UseCase, 상태 규칙은 Domain이 담당한다. 잠금 조회는 이름에 Query가 있어도 read-only transaction으로 바꾸지 않는다.
+Finder/Support는 없다. Aggregate 조회는 Domain Repository, 소유권을 확인한 업무 조회는 Find UseCase, 상태 규칙은 Domain이 담당한다. 잠금 조회는 조회라는 이유만으로 read-only transaction으로 바꾸지 않는다.
 
-의존성 필드·생성자 매개변수·테스트 의존성 변수는 타입의 역할 접미사를 유지한다. 예: `purchaseWaitingCommandPort`, `findPurchaseWaitingUseCase`, `purchaseWaitingJpaRepository`, `processPurchaseWaitingService`. 다른 모듈의 기존 Facade를 받는 변수도 `purchaseCommandFacade`처럼 명명한다.
+의존성 필드·생성자 매개변수·테스트 의존성 변수는 타입의 역할 접미사를 유지한다. 예: `purchaseWaitingCommandPort`, `findPurchaseWaitingUseCase`, `purchaseWaitingJpaRepository`, `processPurchaseWaitingService`. 다른 모듈 Input Port를 받는 변수도 `purchaseCommandPort`처럼 명명한다.
 
 ### DTO 경계
 
@@ -156,11 +157,10 @@ Finder/Support는 없다. 데이터 조회는 Entry Query Port, 소유권을 확
 | `usecase.dto.command` | 접수·claim·처리·예약의 내부 업무 입력 |
 | `usecase.dto.query` | 회원 소유권을 포함한 상태 조회 입력 |
 | `usecase.dto.result` | PurchaseWaitingResult. 기존 두 단계 Result를 합침 |
-| `port.out.dto` | PurchaseWaitingClaim, PurchaseWaitingInsertResult |
+| `port.out.dto` | Redis 작업용 PurchaseWaitingClaim |
+| `domain.repository` | Aggregate 영속 계약과 PurchaseWaitingInsertResult |
 | `adapter.in.web.response` | PurchaseWaitingResponse. 기존 JSON 필드 유지 |
 
 내부 DTO의 waitingEntryId는 HTTP Response의 queueEntryId로 변환한다. URL·응답 필드·오류 코드·DB 이름·Redis 키·Lua·환경 변수는 바꾸지 않았다. Input Port와 DTO만 Modulith의 공개 api Named Interface이고 Worker Port는 내부 하위 패키지다.
 
-### 과도기 검증
-
-기존 LayeringArchitectureTests는 다른 모듈 전환 후 개정하라는 사용자 지시로 수정하지 않았다. Scheduler의 presentation 고정 정책에서 1건, 옛 presentation 및 application.command/query/support 패키지가 비어 생기는 검사에서 2건 실패한다. 정확한 실패와 나머지 검증 결과는 [테스트 기준](../development/testing.md#purchasewaiting-구조-전환-중-검사)을 따른다. 전체 검사가 통과했다고 표현하지 않는다.
+Aggregate 영속성 계약의 소유 기준은 [ADR 0009](../adr/0009-domain-repository-ownership.md), 전체 모듈의 의존 방향과 검사 기준은 [모듈 설계](module-boundaries.md#레이어-구조) 및 [테스트 기준](../development/testing.md#아키텍처-검사-정책)을 따른다.

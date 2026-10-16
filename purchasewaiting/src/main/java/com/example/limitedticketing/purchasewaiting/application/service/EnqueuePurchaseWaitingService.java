@@ -2,17 +2,16 @@ package com.example.limitedticketing.purchasewaiting.application.service;
 
 import com.example.limitedticketing.purchasewaiting.application.port.out.MemberEligibilityPort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingAdmissionPort;
-import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingEntryCommandPort;
-import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingEntryQueryPort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingIdGeneratorPort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingQueuePort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingSequencePort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.SaleProductQueryPort;
-import com.example.limitedticketing.purchasewaiting.application.port.out.dto.PurchaseWaitingInsertResult;
 import com.example.limitedticketing.purchasewaiting.application.usecase.EnqueuePurchaseWaitingUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.EnqueuePurchaseWaitingCommand;
 import com.example.limitedticketing.purchasewaiting.domain.exception.PurchaseWaitingException;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingEntry;
+import com.example.limitedticketing.purchasewaiting.domain.repository.PurchaseWaitingEntryRepository;
+import com.example.limitedticketing.purchasewaiting.domain.repository.PurchaseWaitingInsertResult;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -28,8 +27,7 @@ public class EnqueuePurchaseWaitingService implements EnqueuePurchaseWaitingUseC
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(EnqueuePurchaseWaitingService.class);
     private final MemberEligibilityPort memberEligibilityPort;
     private final SaleProductQueryPort saleProductQueryPort;
-    private final PurchaseWaitingEntryQueryPort purchaseWaitingEntryQueryPort;
-    private final PurchaseWaitingEntryCommandPort purchaseWaitingEntryCommandPort;
+    private final PurchaseWaitingEntryRepository purchaseWaitingEntryRepository;
     private final PurchaseWaitingIdGeneratorPort purchaseWaitingIdGeneratorPort;
     private final PurchaseWaitingSequencePort purchaseWaitingSequencePort;
     private final PurchaseWaitingQueuePort purchaseWaitingQueuePort;
@@ -40,8 +38,7 @@ public class EnqueuePurchaseWaitingService implements EnqueuePurchaseWaitingUseC
     public EnqueuePurchaseWaitingService(
         MemberEligibilityPort memberEligibilityPort,
         SaleProductQueryPort saleProductQueryPort,
-        PurchaseWaitingEntryQueryPort purchaseWaitingEntryQueryPort,
-        PurchaseWaitingEntryCommandPort purchaseWaitingEntryCommandPort,
+        PurchaseWaitingEntryRepository purchaseWaitingEntryRepository,
         PurchaseWaitingIdGeneratorPort purchaseWaitingIdGeneratorPort,
         PurchaseWaitingSequencePort purchaseWaitingSequencePort,
         PurchaseWaitingQueuePort purchaseWaitingQueuePort,
@@ -51,8 +48,7 @@ public class EnqueuePurchaseWaitingService implements EnqueuePurchaseWaitingUseC
     ) {
         this.memberEligibilityPort = memberEligibilityPort;
         this.saleProductQueryPort = saleProductQueryPort;
-        this.purchaseWaitingEntryQueryPort = purchaseWaitingEntryQueryPort;
-        this.purchaseWaitingEntryCommandPort = purchaseWaitingEntryCommandPort;
+        this.purchaseWaitingEntryRepository = purchaseWaitingEntryRepository;
         this.purchaseWaitingIdGeneratorPort = purchaseWaitingIdGeneratorPort;
         this.purchaseWaitingSequencePort = purchaseWaitingSequencePort;
         this.purchaseWaitingQueuePort = purchaseWaitingQueuePort;
@@ -67,7 +63,7 @@ public class EnqueuePurchaseWaitingService implements EnqueuePurchaseWaitingUseC
     @Override
     @Transactional
     public UUID enqueue(EnqueuePurchaseWaitingCommand command) {
-        PurchaseWaitingEntry existing = purchaseWaitingEntryQueryPort.findByMemberIdAndPurchaseRequestKey(
+        PurchaseWaitingEntry existing = purchaseWaitingEntryRepository.findByMemberIdAndPurchaseRequestKey(
                 command.memberId(),
                 command.purchaseRequestKey()
             )
@@ -80,14 +76,14 @@ public class EnqueuePurchaseWaitingService implements EnqueuePurchaseWaitingUseC
         memberEligibilityPort.ensurePurchasable(command.memberId());
         saleProductQueryPort.ensurePurchasable(command.saleProductId(), requestedAt);
 
-        purchaseWaitingEntryCommandPort.lockQueue(command.saleProductId());
-        PurchaseWaitingEntry concurrentRetry = purchaseWaitingEntryQueryPort.findByMemberIdAndPurchaseRequestKey(
+        purchaseWaitingEntryRepository.lockQueue(command.saleProductId());
+        PurchaseWaitingEntry concurrentRetry = purchaseWaitingEntryRepository.findByMemberIdAndPurchaseRequestKey(
             command.memberId(), command.purchaseRequestKey()).orElse(null);
         if (concurrentRetry != null) {
             return resultOf(concurrentRetry, command.saleProductId());
         }
         purchaseWaitingAdmissionPort.check(command.memberId(), command.saleProductId());
-        if (purchaseWaitingEntryQueryPort.countActive(command.saleProductId()) >= maxOutstanding) {
+        if (purchaseWaitingEntryRepository.countActive(command.saleProductId()) >= maxOutstanding) {
             throw PurchaseWaitingException.capacityExceeded();
         }
 
@@ -99,7 +95,7 @@ public class EnqueuePurchaseWaitingService implements EnqueuePurchaseWaitingUseC
             purchaseWaitingSequencePort.nextSequence(command.saleProductId()),
             requestedAt
         );
-        PurchaseWaitingInsertResult savedEntry = purchaseWaitingEntryCommandPort.saveIfAbsent(entry);
+        PurchaseWaitingInsertResult savedEntry = purchaseWaitingEntryRepository.saveIfAbsent(entry);
         if (savedEntry.created()) {
             registerRedisEnqueueAfterCommit(savedEntry.entry());
         }

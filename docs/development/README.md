@@ -18,7 +18,7 @@
 ### PostgreSQL과 Redis 실행
 
 ```bash
-cp .env.example .env
+test -f .env || cp .env.example .env
 docker compose up -d
 docker compose ps
 ```

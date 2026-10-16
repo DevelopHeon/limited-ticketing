@@ -12,9 +12,7 @@ public class ReserveWaitingPurchaseService implements ReserveWaitingPurchaseUseC
 
     private final PurchaseReservationPort purchaseReservationPort;
 
-    public ReserveWaitingPurchaseService(
-        PurchaseReservationPort purchaseReservationPort
-    ) {
+    public ReserveWaitingPurchaseService(PurchaseReservationPort purchaseReservationPort) {
         this.purchaseReservationPort = purchaseReservationPort;
     }
 

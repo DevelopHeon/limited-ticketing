@@ -13,9 +13,7 @@ public class PurchaseWaitingQueryService implements PurchaseWaitingQueryPort {
 
     private final FindPurchaseWaitingUseCase findPurchaseWaitingUseCase;
 
-    public PurchaseWaitingQueryService(
-        FindPurchaseWaitingUseCase findPurchaseWaitingUseCase
-    ) {
+    public PurchaseWaitingQueryService(FindPurchaseWaitingUseCase findPurchaseWaitingUseCase) {
         this.findPurchaseWaitingUseCase = findPurchaseWaitingUseCase;
     }
 

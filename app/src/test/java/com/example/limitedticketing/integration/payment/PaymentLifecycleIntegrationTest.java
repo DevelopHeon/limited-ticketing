@@ -4,10 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-
+import com.example.limitedticketing.integration.support.FixedClockConfiguration;
 import com.example.limitedticketing.inventory.domain.model.Inventory;
 import com.example.limitedticketing.inventory.domain.repository.InventoryRepository;
-import com.example.limitedticketing.integration.support.FixedClockConfiguration;
 import com.example.limitedticketing.member.domain.model.Member;
 import com.example.limitedticketing.member.domain.repository.MemberRepository;
 import com.example.limitedticketing.payment.domain.model.Payment;
@@ -41,8 +40,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.MediaType;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -95,10 +94,10 @@ class PaymentLifecycleIntegrationTest {
     private Clock clock;
 
     @DynamicPropertySource
-    static void configureProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgresql::getJdbcUrl);
-        registry.add("spring.datasource.username", postgresql::getUsername);
-        registry.add("spring.datasource.password", postgresql::getPassword);
+    static void configureProperties(DynamicPropertyRegistry dynamicPropertyRegistry) {
+        dynamicPropertyRegistry.add("spring.datasource.url", postgresql::getJdbcUrl);
+        dynamicPropertyRegistry.add("spring.datasource.username", postgresql::getUsername);
+        dynamicPropertyRegistry.add("spring.datasource.password", postgresql::getPassword);
     }
 
     @Test
@@ -268,14 +267,14 @@ class PaymentLifecycleIntegrationTest {
     private List<Long> createPaymentsConcurrently(Fixture fixture, long purchaseId, String paymentRequestKey)
         throws Exception {
         int requestCount = 20;
-        ExecutorService executor = Executors.newFixedThreadPool(requestCount);
+        ExecutorService executorService = Executors.newFixedThreadPool(requestCount);
         CountDownLatch ready = new CountDownLatch(requestCount);
         CountDownLatch start = new CountDownLatch(1);
 
         try {
             List<Future<Long>> results = new ArrayList<>();
             for (int index = 0; index < requestCount; index++) {
-                results.add(executor.submit(() -> {
+                results.add(executorService.submit(() -> {
                     ready.countDown();
                     if (!start.await(10, TimeUnit.SECONDS)) {
                         throw new IllegalStateException("Concurrent payment start timed out");
@@ -303,7 +302,7 @@ class PaymentLifecycleIntegrationTest {
             return paymentIds;
         } finally {
             start.countDown();
-            executor.shutdownNow();
+            executorService.shutdownNow();
         }
     }
 

@@ -4,17 +4,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-
+import com.example.limitedticketing.integration.support.FixedClockConfiguration;
 import com.example.limitedticketing.inventory.domain.model.Inventory;
 import com.example.limitedticketing.inventory.domain.repository.InventoryRepository;
-import com.example.limitedticketing.integration.support.FixedClockConfiguration;
 import com.example.limitedticketing.member.domain.model.Member;
 import com.example.limitedticketing.member.domain.repository.MemberRepository;
-import com.example.limitedticketing.purchase.domain.model.PurchaseStatus;
+import com.example.limitedticketing.purchase.application.service.PurchaseExpirationService;
 import com.example.limitedticketing.purchase.domain.event.PurchaseReserved;
 import com.example.limitedticketing.purchase.domain.model.Purchase;
+import com.example.limitedticketing.purchase.domain.model.PurchaseStatus;
 import com.example.limitedticketing.purchase.domain.repository.PurchaseRepository;
-import com.example.limitedticketing.purchase.application.command.service.PurchaseExpirationService;
 import com.example.limitedticketing.sale.domain.model.Product;
 import com.example.limitedticketing.sale.domain.model.SaleProduct;
 import com.example.limitedticketing.sale.domain.repository.ProductRepository;
@@ -36,17 +35,17 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.event.EventListener;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.MvcResult;
 
 @Testcontainers
 @SpringBootTest
@@ -93,10 +92,10 @@ class PurchaseReservationIntegrationTest {
     private Clock clock;
 
     @DynamicPropertySource
-    static void configureProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgresql::getJdbcUrl);
-        registry.add("spring.datasource.username", postgresql::getUsername);
-        registry.add("spring.datasource.password", postgresql::getPassword);
+    static void configureProperties(DynamicPropertyRegistry dynamicPropertyRegistry) {
+        dynamicPropertyRegistry.add("spring.datasource.url", postgresql::getJdbcUrl);
+        dynamicPropertyRegistry.add("spring.datasource.username", postgresql::getUsername);
+        dynamicPropertyRegistry.add("spring.datasource.password", postgresql::getPassword);
     }
 
     @BeforeEach

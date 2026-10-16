@@ -3,7 +3,6 @@ package com.example.limitedticketing.integration.purchase;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-
 import com.example.limitedticketing.inventory.domain.model.Inventory;
 import com.example.limitedticketing.inventory.domain.repository.InventoryRepository;
 import com.example.limitedticketing.member.domain.model.Member;
@@ -76,10 +75,10 @@ class PurchaseLifecycleConcurrencyIntegrationTest {
     private PaymentRepository paymentRepository;
 
     @DynamicPropertySource
-    static void configureProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgresql::getJdbcUrl);
-        registry.add("spring.datasource.username", postgresql::getUsername);
-        registry.add("spring.datasource.password", postgresql::getPassword);
+    static void configureProperties(DynamicPropertyRegistry dynamicPropertyRegistry) {
+        dynamicPropertyRegistry.add("spring.datasource.url", postgresql::getJdbcUrl);
+        dynamicPropertyRegistry.add("spring.datasource.username", postgresql::getUsername);
+        dynamicPropertyRegistry.add("spring.datasource.password", postgresql::getPassword);
     }
 
     @ParameterizedTest(name = "{displayName} [{arguments}]")
@@ -89,7 +88,7 @@ class PurchaseLifecycleConcurrencyIntegrationTest {
         throws Exception {
         Fixture fixture = createTwoReservedPurchases();
         List<String> actions = List.of(firstAction, secondAction);
-        ExecutorService executor = Executors.newFixedThreadPool(2);
+        ExecutorService executorService = Executors.newFixedThreadPool(2);
         List<Future<Integer>> results = new java.util.ArrayList<>();
         try {
             new TransactionTemplate(transactionManager).executeWithoutResult(transaction -> {
@@ -105,7 +104,7 @@ class PurchaseLifecycleConcurrencyIntegrationTest {
                     String path = action.equals("cancel")
                         ? "/api/purchases/" + fixture.purchaseId() + "/cancel"
                         : "/api/payments/" + fixture.paymentId() + "/" + action;
-                    results.add(executor.submit(() -> mockMvc.perform(post(path)
+                    results.add(executorService.submit(() -> mockMvc.perform(post(path)
                             .header("X-Member-Id", fixture.memberId()))
                         .andReturn().getResponse().getStatus()));
                 }
@@ -139,7 +138,7 @@ class PurchaseLifecycleConcurrencyIntegrationTest {
             assertThat(paymentRepository.findById(fixture.paymentId()).orElseThrow().getStatus())
                 .isEqualTo(expectedPaymentStatus);
         } finally {
-            executor.shutdownNow();
+            executorService.shutdownNow();
         }
     }
 

@@ -1,6 +1,6 @@
 package com.example.limitedticketing.purchasewaiting.infrastructure.adapter.out.module;
 
-import com.example.limitedticketing.member.application.port.in.MemberPurchaseEligibilityFacade;
+import com.example.limitedticketing.member.application.port.in.MemberPurchaseEligibilityPort;
 import com.example.limitedticketing.member.application.port.in.dto.EnsureMemberPurchasableInput;
 import com.example.limitedticketing.purchasewaiting.application.port.out.MemberEligibilityPort;
 import org.springframework.stereotype.Component;
@@ -8,16 +8,16 @@ import org.springframework.stereotype.Component;
 @Component
 public class MemberModuleAdapter implements MemberEligibilityPort {
 
-    private final MemberPurchaseEligibilityFacade memberPurchaseEligibilityFacade;
+    private final MemberPurchaseEligibilityPort memberPurchaseEligibilityPort;
 
     public MemberModuleAdapter(
-        MemberPurchaseEligibilityFacade memberPurchaseEligibilityFacade
+        MemberPurchaseEligibilityPort memberPurchaseEligibilityPort
     ) {
-        this.memberPurchaseEligibilityFacade = memberPurchaseEligibilityFacade;
+        this.memberPurchaseEligibilityPort = memberPurchaseEligibilityPort;
     }
 
     @Override
     public void ensurePurchasable(Long memberId) {
-        memberPurchaseEligibilityFacade.ensurePurchasable(new EnsureMemberPurchasableInput(memberId));
+        memberPurchaseEligibilityPort.ensurePurchasable(new EnsureMemberPurchasableInput(memberId));
     }
 }

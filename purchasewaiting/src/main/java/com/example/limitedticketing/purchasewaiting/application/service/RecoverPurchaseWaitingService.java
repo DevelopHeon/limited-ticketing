@@ -1,13 +1,12 @@
 package com.example.limitedticketing.purchasewaiting.application.service;
 
-import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingEntryCommandPort;
-import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingEntryQueryPort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingQueuePort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingQueueRecoveryPort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.SaleProductQueryPort;
 import com.example.limitedticketing.purchasewaiting.application.usecase.RecoverPurchaseWaitingUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.RestorePurchaseWaitingUseCase;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingEntry;
+import com.example.limitedticketing.purchasewaiting.domain.repository.PurchaseWaitingEntryRepository;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -28,8 +27,7 @@ public class RecoverPurchaseWaitingService implements RecoverPurchaseWaitingUseC
 
     private static final Logger log = LoggerFactory.getLogger(RecoverPurchaseWaitingService.class);
 
-    private final PurchaseWaitingEntryQueryPort purchaseWaitingEntryQueryPort;
-    private final PurchaseWaitingEntryCommandPort purchaseWaitingEntryCommandPort;
+    private final PurchaseWaitingEntryRepository purchaseWaitingEntryRepository;
     private final PurchaseWaitingQueuePort purchaseWaitingQueuePort;
     private final PurchaseWaitingQueueRecoveryPort purchaseWaitingQueueRecoveryPort;
     private final SaleProductQueryPort saleProductQueryPort;
@@ -38,8 +36,7 @@ public class RecoverPurchaseWaitingService implements RecoverPurchaseWaitingUseC
     private final int recoveryBatchSize;
 
     public RecoverPurchaseWaitingService(
-        PurchaseWaitingEntryQueryPort purchaseWaitingEntryQueryPort,
-        PurchaseWaitingEntryCommandPort purchaseWaitingEntryCommandPort,
+        PurchaseWaitingEntryRepository purchaseWaitingEntryRepository,
         PurchaseWaitingQueuePort purchaseWaitingQueuePort,
         PurchaseWaitingQueueRecoveryPort purchaseWaitingQueueRecoveryPort,
         SaleProductQueryPort saleProductQueryPort,
@@ -47,8 +44,7 @@ public class RecoverPurchaseWaitingService implements RecoverPurchaseWaitingUseC
         RestorePurchaseWaitingUseCase restorePurchaseWaitingUseCase,
         @Value("${limited-ticketing.queue.worker.recovery-batch-size:1000}") int recoveryBatchSize
     ) {
-        this.purchaseWaitingEntryQueryPort = purchaseWaitingEntryQueryPort;
-        this.purchaseWaitingEntryCommandPort = purchaseWaitingEntryCommandPort;
+        this.purchaseWaitingEntryRepository = purchaseWaitingEntryRepository;
         this.purchaseWaitingQueuePort = purchaseWaitingQueuePort;
         this.purchaseWaitingQueueRecoveryPort = purchaseWaitingQueueRecoveryPort;
         this.saleProductQueryPort = saleProductQueryPort;
@@ -70,7 +66,7 @@ public class RecoverPurchaseWaitingService implements RecoverPurchaseWaitingUseC
     private List<RecoveredAttempt> recoverExpiredProcessingEntries(LocalDateTime threshold) {
         List<RecoveredAttempt> recovered = new ArrayList<>();
         while (true) {
-            List<PurchaseWaitingEntry> entries = purchaseWaitingEntryQueryPort
+            List<PurchaseWaitingEntry> entries = purchaseWaitingEntryRepository
                 .findExpiredProcessingEntries(threshold, recoveryBatchSize);
             if (entries.isEmpty()) {
                 return recovered;
@@ -80,7 +76,7 @@ public class RecoverPurchaseWaitingService implements RecoverPurchaseWaitingUseC
                 UUID token = entry.getProcessingToken();
                 entry.returnToWaiting();
                 recovered.add(new RecoveredAttempt(entry, token));
-                purchaseWaitingEntryCommandPort.save(entry);
+                purchaseWaitingEntryRepository.save(entry);
             });
         }
     }
@@ -108,13 +104,13 @@ public class RecoverPurchaseWaitingService implements RecoverPurchaseWaitingUseC
     }
 
     private Set<Long> findRecoverySaleProductIds() {
-        Set<Long> saleProductIds = new HashSet<>(purchaseWaitingEntryQueryPort.findSaleProductIdsWithWaitingEntries());
+        Set<Long> saleProductIds = new HashSet<>(purchaseWaitingEntryRepository.findSaleProductIdsWithWaitingEntries());
         saleProductIds.addAll(purchaseWaitingQueueRecoveryPort.findSaleProductIds());
         return saleProductIds;
     }
 
     private void recoverAllWaitingEntries() {
-        purchaseWaitingEntryQueryPort.findSaleProductIdsWithWaitingEntries()
+        purchaseWaitingEntryRepository.findSaleProductIdsWithWaitingEntries()
             .forEach(this::recoverWaitingEntries);
     }
 
@@ -122,7 +118,7 @@ public class RecoverPurchaseWaitingService implements RecoverPurchaseWaitingUseC
         long cursor = 0;
         UUID entryCursor = new UUID(0, 0);
         while (true) {
-            List<PurchaseWaitingEntry> entries = purchaseWaitingEntryQueryPort.findWaitingEntriesAfter(
+            List<PurchaseWaitingEntry> entries = purchaseWaitingEntryRepository.findWaitingEntriesAfter(
                 saleProductId,
                 cursor,
                 entryCursor,
@@ -159,7 +155,7 @@ public class RecoverPurchaseWaitingService implements RecoverPurchaseWaitingUseC
         List<UUID> ids = new ArrayList<>(queueEntryIds);
         Set<UUID> existingIds = new HashSet<>();
         for (int offset = 0; offset < ids.size(); offset += recoveryBatchSize) {
-            existingIds.addAll(purchaseWaitingEntryQueryPort.findActiveIds(
+            existingIds.addAll(purchaseWaitingEntryRepository.findActiveIds(
                 ids.subList(offset, Math.min(offset + recoveryBatchSize, ids.size()))
             ));
         }
@@ -167,7 +163,7 @@ public class RecoverPurchaseWaitingService implements RecoverPurchaseWaitingUseC
     }
 
     private void deleteCompletedClosedSaleKeys(Long saleProductId) {
-        if (purchaseWaitingEntryQueryPort.existsActiveEntry(saleProductId)) {
+        if (purchaseWaitingEntryRepository.existsActiveEntry(saleProductId)) {
             return;
         }
         if (!saleProductQueryPort.exists(saleProductId) || saleProductQueryPort.isClosed(saleProductId)) {
@@ -182,6 +178,7 @@ public class RecoverPurchaseWaitingService implements RecoverPurchaseWaitingUseC
             log.warn("Could not determine whether Redis keys for sale product {} can be deleted", saleProductId, exception);
         }
     }
+
     private record RecoveredAttempt(PurchaseWaitingEntry entry, UUID token) {
     }
 }

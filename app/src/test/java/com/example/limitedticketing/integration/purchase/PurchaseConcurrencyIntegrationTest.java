@@ -1,5 +1,7 @@
 package com.example.limitedticketing.integration.purchase;
 
+import static org.assertj.core.api.InstanceOfAssertFactories.LONG;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import com.example.limitedticketing.inventory.domain.model.Inventory;
 import com.example.limitedticketing.inventory.domain.repository.InventoryRepository;
 import com.example.limitedticketing.member.domain.model.Member;
@@ -38,9 +40,6 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.assertj.core.api.InstanceOfAssertFactories.LONG;
-
 @Testcontainers
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -76,10 +75,10 @@ class PurchaseConcurrencyIntegrationTest {
     private InventoryRepository inventoryRepository;
 
     @DynamicPropertySource
-    static void configureProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgresql::getJdbcUrl);
-        registry.add("spring.datasource.username", postgresql::getUsername);
-        registry.add("spring.datasource.password", postgresql::getPassword);
+    static void configureProperties(DynamicPropertyRegistry dynamicPropertyRegistry) {
+        dynamicPropertyRegistry.add("spring.datasource.url", postgresql::getJdbcUrl);
+        dynamicPropertyRegistry.add("spring.datasource.username", postgresql::getUsername);
+        dynamicPropertyRegistry.add("spring.datasource.password", postgresql::getPassword);
     }
 
     @Test
@@ -146,14 +145,14 @@ class PurchaseConcurrencyIntegrationTest {
         List<Long> memberIds,
         java.util.function.Function<Long, String> purchaseRequestKeyProvider
     ) throws Exception {
-        ExecutorService executor = Executors.newFixedThreadPool(memberIds.size());
+        ExecutorService executorService = Executors.newFixedThreadPool(memberIds.size());
         CountDownLatch ready = new CountDownLatch(memberIds.size());
         CountDownLatch start = new CountDownLatch(1);
 
         try {
             List<Future<ReservationResponse>> results = new ArrayList<>();
             for (Long memberId : memberIds) {
-                results.add(executor.submit(() -> {
+                results.add(executorService.submit(() -> {
                     ready.countDown();
                     if (!start.await(10, TimeUnit.SECONDS)) {
                         throw new IllegalStateException("Concurrent reservation start timed out");
@@ -181,7 +180,7 @@ class PurchaseConcurrencyIntegrationTest {
             return responses;
         } finally {
             start.countDown();
-            executor.shutdownNow();
+            executorService.shutdownNow();
         }
     }
 

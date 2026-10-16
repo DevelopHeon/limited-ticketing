@@ -1,6 +1,6 @@
 # ADR 0005 · 입력 어댑터와 출력 어댑터의 역할에 따른 계층 배치
 
-- 상태: **Accepted · 구현은 단계별 적용**
+- 상태: **Superseded · 입력·출력 배치는 ADR 0007·0008로 대체**
 - 결정일: 2026-10-15. 사용자와 계층 방향을 논의해 채택했다.
 - 2단계에서 구매 대기·구매 만료 Scheduler와 내부 입력 Facade 분리를 적용했다. Kafka Consumer는 3단계 대상이며 아직 없다.
 
@@ -33,3 +33,5 @@ HTTP·메시지·스케줄 입력이 동일한 업무 유스케이스를 사용�
 ## 후속 결정 · 2026-10-16
 
 [ADR 0007](0007-purchasewaiting-ports-and-adapters.md)에 따라 purchasewaiting은 입력 Adapter도 infrastructure/adapter/in에 배치하고 Input Port → Driving Adapter → UseCase → Service 흐름으로 전환한다. 다른 모듈의 presentation 배치는 아직 유지한다. 위 내용은 최초 결정과 2단계 적용 당시의 기록이다.
+
+전체 업무 모듈은 ADR 0008의 입력·출력 infrastructure 배치를 따른다. 이 문서의 presentation 배치는 최초 결정 당시의 기록으로 보존한다. 현재 구현 범위와 진행 상태는 [로드맵](../plans/roadmap.md)이 소유한다.

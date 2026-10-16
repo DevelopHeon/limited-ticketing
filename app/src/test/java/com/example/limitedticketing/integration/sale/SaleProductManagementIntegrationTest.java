@@ -6,12 +6,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-
 import com.example.limitedticketing.inventory.domain.model.Inventory;
 import com.example.limitedticketing.inventory.domain.repository.InventoryRepository;
 import com.example.limitedticketing.sale.domain.model.SaleStatus;
-import com.example.limitedticketing.sale.presentation.request.ChangeSalePeriodRequest;
-import com.example.limitedticketing.sale.presentation.request.CreateSaleProductRequest;
+import com.example.limitedticketing.sale.infrastructure.adapter.in.web.request.ChangeSalePeriodRequest;
+import com.example.limitedticketing.sale.infrastructure.adapter.in.web.request.CreateSaleProductRequest;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
@@ -51,10 +50,10 @@ class SaleProductManagementIntegrationTest {
     private InventoryRepository inventoryRepository;
 
     @DynamicPropertySource
-    static void configureProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgresql::getJdbcUrl);
-        registry.add("spring.datasource.username", postgresql::getUsername);
-        registry.add("spring.datasource.password", postgresql::getPassword);
+    static void configureProperties(DynamicPropertyRegistry dynamicPropertyRegistry) {
+        dynamicPropertyRegistry.add("spring.datasource.url", postgresql::getJdbcUrl);
+        dynamicPropertyRegistry.add("spring.datasource.username", postgresql::getUsername);
+        dynamicPropertyRegistry.add("spring.datasource.password", postgresql::getPassword);
     }
 
     @Test

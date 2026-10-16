@@ -6,7 +6,7 @@
 
 - PostgreSQL은 구매, 재고, 대기열 상태의 최종 정합성 기준이다.
 - Redis는 대기 순서와 처리 슬롯을 제어하는 보조 저장소다. 재고 수량과 구매 확정 상태를 Redis에 두지 않는다.
-- 각 도메인은 자기 모델과 Repository를 소유한다. 다른 도메인은 공개 Facade와 DTO만 사용한다.
+- 각 도메인은 자기 Aggregate와 Domain Repository를 소유한다. 다른 모듈은 공개 Input Port와 DTO만 사용한다.
 - HTTP 계약, 모듈 공개 계약, 내부 유스케이스 DTO를 분리한다.
 - 비동기 처리로 바꿔도 구매 멱등성 및 재고의 조건부 원자 갱신을 최종 보호 장치로 유지한다.
 
@@ -85,102 +85,62 @@ package com.example.limitedticketing.purchase;
 package com.example.limitedticketing.member.application.port.in;
 ```
 
-다른 모듈을 호출할 때는 대상 모듈의 `application.port.in` Facade와 `application.port.in.dto`만 참조한다. 대상 모듈의 Domain 모델, JPA Entity, Spring Data Repository, 내부 Command/Query Service는 직접 참조하지 않는다.
-
-purchasewaiting 이외 모듈의 Scheduler는 presentation에서 내부 입력 Facade를 호출한다. 입력·출력의 배치 기준은 [ADR 0005](../adr/0005-inbound-outbound-adapters.md)를 따른다. 아래 구조는 현재 구현 기준이다.
+다른 모듈 호출은 자신의 Application Output Port → infrastructure의 ModuleAdapter → 대상 모듈 Input Port로 연결한다. 상대 Domain·Repository·Entity·내부 UseCase·Service는 참조하지 않는다. ModuleAdapter는 필요한 외부 DTO를 자신의 출력 DTO로 변환한다. 공통 값 타입은 shared의 공개 계약을 사용한다.
 
 ## 레이어 구조
 
-purchasewaiting 이외의 모듈은 아래 구조를 사용한다. purchasewaiting의 새 구조는 [구매 대기 설계](purchase-waiting.md#portadapter-구조)를 따른다. 필요한 코드가 없으면 패키지를 미리 만들지 않는다.
+모든 업무 모듈은 같은 책임 배치를 사용한다. 기능이 없는 패키지나 Port를 미리 생성하지 않는다. app은 실행 조립·전역 오류·보안·공통 키 발급을, shared는 제한된 공통 값·예외를 소유하며 업무 모듈 모양을 억지로 복제하지 않는다.
 
 ```text
-purchase
-├── presentation                         # HTTP 어댑터
-│   ├── controller
-│   ├── request
-│   └── response
-├── application                          # 유스케이스와 트랜잭션 경계
-│   ├── command
-│   │   ├── dto
-│   │   └── service
-│   ├── query
-│   │   ├── dto
-│   │   └── service
-│   ├── support                           # Finder 등 유스케이스 공통 보조 객체
-│   └── port
-│       ├── in                            # 다른 모듈/Controller에 공개하는 Facade
-│       │   └── dto
-│       └── out                           # 인프라에 요구하는 기술 중립 계약
-├── domain                               # 순수 비즈니스 규칙
-│   ├── event
-│   ├── exception
-│   ├── model
-│   └── repository
-└── infrastructure                       # JPA, Redis, Spring Event 등의 구현체
-    ├── configuration
-    ├── messaging
-    ├── persistence
-    │   ├── entity
-    │   └── repository
-    └── redis
+업무 모듈/
+├── application/
+│   ├── port/in/                 공개 Port·외부 Input/Output DTO
+│   │   └── worker/              다른 모듈에 공개하지 않는 스케줄 진입 Port
+│   ├── port/out/                외부 기능·기술·검색 조회 계약과 출력 DTO
+│   ├── usecase/                 내부 업무 interface·command/query/result DTO
+│   ├── service/                 UseCase 구현·transaction·단순 Port 진입 연결
+│   └── facade/                  여러 UseCase의 순차 조합이 필요한 경우
+├── domain/
+│   ├── model/                   Aggregate·상태 규칙
+│   ├── repository/              Aggregate 조회·저장 추상 계약과 저장 결과
+│   ├── event/                   필요한 Domain 이벤트
+│   └── exception/
+└── infrastructure/adapter/
+    ├── in/web/                  Controller·HTTP Request/Response
+    ├── in/scheduler/            실행 주기
+    ├── out/persistence/         Domain Repository·검색 Port의 DB 구현·JPA
+    ├── out/module/              다른 모듈 공개 Port 연결
+    └── out/...                  Redis·이벤트·실행기 등 실제 필요한 구현
 ```
 
-### 레이어 책임
+Controller·Scheduler 자체가 Input Adapter이며 Input Port를 호출한다. 일반 진입 EntryService는 Input/Output과 내부 DTO를 변환해 UseCase에 연결한다. 실제 여러 UseCase를 조합하는 PurchaseWaitingCommandFacade만 facade에 둔다. Application 내부 업무 호출은 UseCase를 사용한다. 의존성 필드·생성자·테스트에는 Port·UseCase·Repository·Service·Adapter 등 타입의 역할 접미사를 유지한다.
 
-| 레이어 | 책임 | 허용되는 의존성 |
-|---|---|---|
-| `presentation` | HTTP 바인딩, 인증 주체 추출, HTTP 응답 생성 | 공개 `port.in`과 HTTP DTO |
-| `application.command` | 상태 변경 유스케이스, 트랜잭션, 도메인 조율 | Domain, 다른 모듈의 공개 API, `port.out` |
-| `application.query` | 상태를 바꾸지 않는 조회 유스케이스 | Domain Repository, 조회용 `port.out` |
-| `application.port.in` | 모듈 외부 진입점, 공개 DTO와 내부 DTO 변환 | 내부 Application Service |
-| `application.port.out` | DB 외 기술에 대한 요구 계약 | 기술 중립 인터페이스만 선언 |
-| `domain` | 상태 전이, 불변식, 도메인 예외, Repository 추상화 | Java와 `shared`의 의미 있는 값 타입 |
-| `infrastructure` | JPA, Spring Data, Redis, Spring Event, Executor 구현 | Domain Repository 및 `port.out` 구현 |
+### Aggregate 영속성과 Application 출력 계약
 
-Domain에는 Spring, JPA, Hibernate 어노테이션을 두지 않는다. JPA 매핑은 `infrastructure.persistence.entity`의 `*JpaEntity`가 소유하고, `*RepositoryAdapter`가 JPA Entity와 Domain 모델을 변환하면서 Domain Repository를 구현한다.
+[ADR 0009](../adr/0009-domain-repository-ownership.md)에 따라 Aggregate의 조회·저장·조건부 전이는 Domain Repository를 직접 사용한다. MemberRepository, ProductRepository, SaleProductRepository, InventoryRepository, PurchaseRepository, PaymentRepository, PurchaseWaitingEntryRepository를 infrastructure의 PersistenceAdapter가 구현한다. 그 사이에 동일 기능의 Application Repository Port나 중계 Adapter를 추가하지 않는다.
 
-### 호출 흐름
+재고 reserve/confirm/release 조건부 UPDATE, 구매·결제 상태 조건부 저장, 대기 요청 행 잠금·claim·복구 조회도 해당 Aggregate의 영속성 계약이다. Domain Repository는 framework·Application에 의존하지 않는다. Query라는 이름만으로 잠금 조회나 복구 transaction을 read-only로 바꾸지 않는다.
+
+판매 목록의 필터·정렬·페이지 조회는 SaleProductSearchPort, Redis 대기·복구·입구 제한과 외부 모듈 호출·이벤트 발행은 Application Output Port다. 상품별 순번 발급도 Aggregate 저장 계약과 구분해 기존 Sequence Port를 유지한다.
 
 ```text
-HTTP 요청
-  -> presentation.request
-  -> application.port.in.dto
-  -> application.port.in.*Facade
-  -> application.command/query.dto
-  -> application.command/query.service
-  -> domain model / domain repository
-  -> infrastructure adapter / JPA entity
-  -> presentation.response
-
-다른 모듈 호출
-  -> 대상 모듈 application.port.in.dto
-  -> 대상 모듈 application.port.in.*Facade
-
-외부 기술 호출
-  -> application service
-  -> application.port.out
-  -> infrastructure 구현체
+외부 입력 → Input Port → EntryService / Facade → UseCase → 업무 Service
+  ├─ Aggregate 영속화 → Domain Repository → PersistenceAdapter
+  └─ 검색·외부 기능 → Application Output Port → Driven Adapter
 ```
-
-`Facade`는 공개 계약을 내부 Command/Query로 변환하고 Service에 위임한다. 비즈니스 규칙과 트랜잭션은 Facade가 아니라 Application Service와 Domain에 둔다. `port.out`은 다른 모듈에서 호출하는 API가 아니라, Application이 인프라 구현에 의존하지 않게 하는 출력 포트다.
 
 ## DTO, 예외, 시간 규칙
 
-### DTO 경계
+| 위치 | 역할 |
+|---|---|
+| infrastructure.adapter.in.web.request/response | HTTP 입력과 응답 |
+| application.port.in.dto | 모듈 공개 Input/Output·공개 상태값 |
+| application.usecase.dto.command/query/result | 내부 업무 실행·조회·결과 |
+| application.port.out.dto | 검색·외부 기능 호출의 내부 출력 계약 |
+| domain.repository | Aggregate 저장 결과·멱등 저장 여부 |
+| shared.api | 성공 응답 외피 |
 
-| 위치 | 역할 | 이름 예시 |
-|---|---|---|
-| `presentation.request` | HTTP 입력 및 Bean Validation | `ReservePurchaseRequest` |
-| `presentation.response` | HTTP JSON 응답 | `PurchaseReservationResponse` |
-| `shared.api` | 성공 응답 외피 | `ApiResponse<T>` |
-| `application.command.dto` | 내부 상태 변경 입력/결과 | `ReservePurchaseCommand`, `PurchaseReservationResult` |
-| `application.query.dto` | 내부 조회 입력/결과 | `FindPurchaseQuery`, `PurchaseDetailResult` |
-| `application.port.in.dto` | 모듈 공개 Facade 계약 | `ReservePurchaseInput`, `PurchaseReservation` |
-| `application.port.out` | 외부 기술 호출 계약 | `PurchaseEventPublisher`, `ReservationQueueStore` |
-
-`presentation`과 `application.port.in.dto`는 Domain Aggregate, Repository, Domain enum, 내부 Command/Query/Support DTO를 직접 import하지 않는다. 공개 상태값은 `String` 또는 공개 계약 enum으로 표현하고, Facade에서 Domain enum으로 변환한다.
-
-단순 DTO 변환은 대상 DTO의 `from(source)` 또는 `of(...)` 정적 팩토리에 둔다. Aggregate를 필수 조회하는 공통 규칙은 `application.support.*Finder`로 분리하며, 각 Service에 같은 `findById(...).orElseThrow(...)`를 반복하지 않는다.
+공개 DTO는 Domain Aggregate·Domain enum·내부 구현 DTO를 노출하지 않는다. HTTP 응답과 모듈 공개 응답도 구분한다. Finder/Support는 별도 계층으로 두지 않으며 필요한 Aggregate 조회와 기존 오류는 Domain Repository로 처리한다. 반복 조회가 한 Service 내부에 있으면 의미 있는 private 메서드로 묶는다.
 
 ### 예외와 HTTP 응답
 
@@ -239,7 +199,7 @@ Aggregate 상태 변경
 
 ## 구매 대기와 실제 구매의 경계
 
-`purchasewaiting`은 구매 대기 접수, 순번, 처리 결과와 복구를 소유한다. Worker는 UseCase → Service → PurchaseReservationPort → PurchaseModuleAdapter를 통해 `purchase`의 공개 Facade로 실제 구매 예약을 실행하며, 구매와 재고의 최종 정합성은 PostgreSQL 트랜잭션이 보호한다.
+`purchasewaiting`은 구매 대기 접수, 순번, 처리 결과와 복구를 소유한다. Worker는 UseCase → Service → PurchaseReservationPort → PurchaseModuleAdapter를 통해 `purchase`의 공개 Input Port로 실제 구매 예약을 실행하며, 구매와 재고의 최종 정합성은 PostgreSQL 트랜잭션이 보호한다.
 
 Redis ZSET은 대기 순서와 처리 슬롯을 제공한다. API 계약, DB 상태, Redis 키와 장애 복구 절차는 [구매 대기 설계](purchase-waiting.md)를 따른다. 직접 예약 HTTP는 `baseline` profile에서만 기준선 측정 경로로 제공한다.
 
@@ -249,10 +209,3 @@ Redis ZSET은 대기 순서와 처리 슬롯을 제공한다. API 계약, DB 상
 - 모듈 간 공개 API와 순환 의존: [ModularityTests](../../app/src/test/java/com/example/limitedticketing/architecture/ModularityTests.java)
 - 코드 규칙과 테스트 배치: [개발 및 검증](../development/testing.md#자동-검증)
 - 메시징 도입 조건: [로드맵](../plans/roadmap.md#메시징-확장-판단-기준)
-
-
-## purchasewaiting의 구조 전환
-
-purchasewaiting은 [ADR 0007](../adr/0007-purchasewaiting-ports-and-adapters.md)의 infrastructure 입력·출력 배치를 유지하고 [ADR 0008](../adr/0008-application-entry-orchestration.md)에 따라 Controller·Scheduler가 Input Adapter 역할을 맡는다. Input Port는 Application Facade 또는 진입 Service가 구현하며 내부 업무 실행은 UseCase로 연결한다. 다른 모듈은 기존 Facade 구조다. Input Port와 공개 DTO는 기존 Named Interface `api`로 노출하고, Worker Port·Facade 구현·UseCase·Service·Output Port·Domain·Adapter는 다른 모듈에 공개하지 않는다.
-
-기존 LayeringArchitectureTests는 사용자의 명시적 지시로 그대로 유지하며 새 구조와의 충돌을 과도기 실패로 보고한다. 이는 검사 완료가 아니며, 모든 모듈 전환 후 의존 방향 정책을 함께 개정한다. Modulith와 Checkstyle은 계속 검증한다.

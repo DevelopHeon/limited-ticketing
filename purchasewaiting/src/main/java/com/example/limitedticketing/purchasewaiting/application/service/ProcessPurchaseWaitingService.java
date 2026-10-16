@@ -1,12 +1,11 @@
 package com.example.limitedticketing.purchasewaiting.application.service;
 
-import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingEntryCommandPort;
-import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingEntryQueryPort;
 import com.example.limitedticketing.purchasewaiting.application.usecase.ProcessPurchaseWaitingUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.ReserveWaitingPurchaseUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ProcessPurchaseWaitingCommand;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ReserveWaitingPurchaseCommand;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingEntry;
+import com.example.limitedticketing.purchasewaiting.domain.repository.PurchaseWaitingEntryRepository;
 import com.example.limitedticketing.shared.exception.DomainException;
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -17,19 +16,16 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ProcessPurchaseWaitingService implements ProcessPurchaseWaitingUseCase {
 
-    private final PurchaseWaitingEntryQueryPort purchaseWaitingEntryQueryPort;
-    private final PurchaseWaitingEntryCommandPort purchaseWaitingEntryCommandPort;
+    private final PurchaseWaitingEntryRepository purchaseWaitingEntryRepository;
     private final ReserveWaitingPurchaseUseCase reserveWaitingPurchaseUseCase;
     private final Clock clock;
 
     public ProcessPurchaseWaitingService(
-        PurchaseWaitingEntryQueryPort purchaseWaitingEntryQueryPort,
-        PurchaseWaitingEntryCommandPort purchaseWaitingEntryCommandPort,
+        PurchaseWaitingEntryRepository purchaseWaitingEntryRepository,
         ReserveWaitingPurchaseUseCase reserveWaitingPurchaseUseCase,
         Clock clock
     ) {
-        this.purchaseWaitingEntryQueryPort = purchaseWaitingEntryQueryPort;
-        this.purchaseWaitingEntryCommandPort = purchaseWaitingEntryCommandPort;
+        this.purchaseWaitingEntryRepository = purchaseWaitingEntryRepository;
         this.reserveWaitingPurchaseUseCase = reserveWaitingPurchaseUseCase;
         this.clock = clock;
     }
@@ -37,7 +33,7 @@ public class ProcessPurchaseWaitingService implements ProcessPurchaseWaitingUseC
     @Override
     @Transactional
     public Optional<PurchaseWaitingEntry> process(ProcessPurchaseWaitingCommand command) {
-        return purchaseWaitingEntryQueryPort.findByIdForUpdate(command.waitingEntryId())
+        return purchaseWaitingEntryRepository.findByIdForUpdate(command.waitingEntryId())
             .filter(entry -> entry.ownsAttempt(command.token()) && entry.getLeaseUntil().isAfter(LocalDateTime.now(clock)))
             .map(this::reserve);
     }
@@ -54,6 +50,6 @@ public class ProcessPurchaseWaitingService implements ProcessPurchaseWaitingUseC
                 entry.fail(exception.getCode(), LocalDateTime.now(clock));
             }
         }
-        return purchaseWaitingEntryCommandPort.save(entry);
+        return purchaseWaitingEntryRepository.save(entry);
     }
 }

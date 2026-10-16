@@ -1,11 +1,10 @@
 package com.example.limitedticketing.purchasewaiting.application.service;
 
-import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingEntryCommandPort;
-import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingEntryQueryPort;
 import com.example.limitedticketing.purchasewaiting.application.usecase.ClaimPurchaseWaitingUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ClaimPurchaseWaitingCommand;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingEntry;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingStatus;
+import com.example.limitedticketing.purchasewaiting.domain.repository.PurchaseWaitingEntryRepository;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -17,21 +16,18 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ClaimPurchaseWaitingService implements ClaimPurchaseWaitingUseCase {
 
-    private final PurchaseWaitingEntryQueryPort purchaseWaitingEntryQueryPort;
-    private final PurchaseWaitingEntryCommandPort purchaseWaitingEntryCommandPort;
+    private final PurchaseWaitingEntryRepository purchaseWaitingEntryRepository;
     private final Clock clock;
     private final int maxConcurrentProcessing;
     private final long processingTimeoutSeconds;
 
     public ClaimPurchaseWaitingService(
-        PurchaseWaitingEntryQueryPort purchaseWaitingEntryQueryPort,
-        PurchaseWaitingEntryCommandPort purchaseWaitingEntryCommandPort,
+        PurchaseWaitingEntryRepository purchaseWaitingEntryRepository,
         Clock clock,
         @Value("${limited-ticketing.queue.worker.max-concurrent-processing}") int maxConcurrentProcessing,
         @Value("${limited-ticketing.queue.worker.processing-timeout-seconds}") long processingTimeoutSeconds
     ) {
-        this.purchaseWaitingEntryQueryPort = purchaseWaitingEntryQueryPort;
-        this.purchaseWaitingEntryCommandPort = purchaseWaitingEntryCommandPort;
+        this.purchaseWaitingEntryRepository = purchaseWaitingEntryRepository;
         this.clock = clock;
         this.maxConcurrentProcessing = maxConcurrentProcessing;
         this.processingTimeoutSeconds = processingTimeoutSeconds;
@@ -42,16 +38,16 @@ public class ClaimPurchaseWaitingService implements ClaimPurchaseWaitingUseCase 
     public Optional<PurchaseWaitingEntry> claim(ClaimPurchaseWaitingCommand command) {
         UUID id = command.waitingEntryId();
         UUID token = command.token();
-        Optional<PurchaseWaitingEntry> entry = purchaseWaitingEntryQueryPort.findById(id);
+        Optional<PurchaseWaitingEntry> entry = purchaseWaitingEntryRepository.findById(id);
         if (entry.isEmpty() || entry.get().getStatus() != PurchaseWaitingStatus.WAITING) {
             return Optional.empty();
         }
-        purchaseWaitingEntryCommandPort.lockQueue(entry.get().getSaleProductId());
-        if (purchaseWaitingEntryQueryPort.countProcessing(entry.get().getSaleProductId()) >= maxConcurrentProcessing) {
+        purchaseWaitingEntryRepository.lockQueue(entry.get().getSaleProductId());
+        if (purchaseWaitingEntryRepository.countProcessing(entry.get().getSaleProductId()) >= maxConcurrentProcessing) {
             return Optional.empty();
         }
         LocalDateTime now = LocalDateTime.now(clock);
-        return purchaseWaitingEntryCommandPort.claim(id, token, now, now.plusSeconds(processingTimeoutSeconds));
+        return purchaseWaitingEntryRepository.claim(id, token, now, now.plusSeconds(processingTimeoutSeconds));
     }
 
     @Override
@@ -59,9 +55,9 @@ public class ClaimPurchaseWaitingService implements ClaimPurchaseWaitingUseCase 
     public Optional<PurchaseWaitingEntry> returnUnstartedClaim(ClaimPurchaseWaitingCommand command) {
         UUID id = command.waitingEntryId();
         UUID token = command.token();
-        return purchaseWaitingEntryQueryPort.findByIdForUpdate(id).filter(entry -> entry.ownsAttempt(token)).map(entry -> {
+        return purchaseWaitingEntryRepository.findByIdForUpdate(id).filter(entry -> entry.ownsAttempt(token)).map(entry -> {
             entry.returnToWaiting();
-            return purchaseWaitingEntryCommandPort.save(entry);
+            return purchaseWaitingEntryRepository.save(entry);
         });
     }
 

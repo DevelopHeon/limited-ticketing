@@ -1,6 +1,5 @@
 package com.example.limitedticketing.purchasewaiting.application.service;
 
-import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingEntryQueryPort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingQueuePort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingTaskExecutionPort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.dto.PurchaseWaitingClaim;
@@ -11,6 +10,7 @@ import com.example.limitedticketing.purchasewaiting.application.usecase.dto.comm
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ProcessPurchaseWaitingCommand;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingEntry;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingStatus;
+import com.example.limitedticketing.purchasewaiting.domain.repository.PurchaseWaitingEntryRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -26,7 +26,7 @@ public class DispatchPurchaseWaitingService implements DispatchPurchaseWaitingUs
 
     private static final Logger log = LoggerFactory.getLogger(DispatchPurchaseWaitingService.class);
 
-    private final PurchaseWaitingEntryQueryPort purchaseWaitingEntryQueryPort;
+    private final PurchaseWaitingEntryRepository purchaseWaitingEntryRepository;
     private final PurchaseWaitingQueuePort purchaseWaitingQueuePort;
     private final ClaimPurchaseWaitingUseCase claimPurchaseWaitingUseCase;
     private final ProcessPurchaseWaitingUseCase processPurchaseWaitingUseCase;
@@ -37,7 +37,7 @@ public class DispatchPurchaseWaitingService implements DispatchPurchaseWaitingUs
     private final AtomicInteger nextProduct = new AtomicInteger();
 
     public DispatchPurchaseWaitingService(
-        PurchaseWaitingEntryQueryPort purchaseWaitingEntryQueryPort,
+        PurchaseWaitingEntryRepository purchaseWaitingEntryRepository,
         PurchaseWaitingQueuePort purchaseWaitingQueuePort,
         ClaimPurchaseWaitingUseCase claimPurchaseWaitingUseCase,
         ProcessPurchaseWaitingUseCase processPurchaseWaitingUseCase,
@@ -46,7 +46,7 @@ public class DispatchPurchaseWaitingService implements DispatchPurchaseWaitingUs
         @Value("${limited-ticketing.queue.worker.max-concurrent-processing}") int maxPerSale,
         @Value("${limited-ticketing.queue.worker.claim-batch-size}") int batchSize
     ) {
-        this.purchaseWaitingEntryQueryPort = purchaseWaitingEntryQueryPort;
+        this.purchaseWaitingEntryRepository = purchaseWaitingEntryRepository;
         this.purchaseWaitingQueuePort = purchaseWaitingQueuePort;
         this.claimPurchaseWaitingUseCase = claimPurchaseWaitingUseCase;
         this.processPurchaseWaitingUseCase = processPurchaseWaitingUseCase;
@@ -62,7 +62,7 @@ public class DispatchPurchaseWaitingService implements DispatchPurchaseWaitingUs
         if (available <= 0) {
             return;
         }
-        List<Long> sales = purchaseWaitingEntryQueryPort.findSaleProductIdsWithWaitingEntries().stream().sorted().toList();
+        List<Long> sales = purchaseWaitingEntryRepository.findSaleProductIdsWithWaitingEntries().stream().sorted().toList();
         if (sales.isEmpty()) {
             return;
         }
@@ -94,7 +94,7 @@ public class DispatchPurchaseWaitingService implements DispatchPurchaseWaitingUs
     }
 
     private void returnUnclaimed(Long saleId, PurchaseWaitingClaim claim) {
-        purchaseWaitingEntryQueryPort.findById(claim.waitingEntryId()).filter(entry -> entry.getStatus() == PurchaseWaitingStatus.WAITING)
+        purchaseWaitingEntryRepository.findById(claim.waitingEntryId()).filter(entry -> entry.getStatus() == PurchaseWaitingStatus.WAITING)
             .ifPresentOrElse(entry -> purchaseWaitingQueuePort.requeue(entry, claim.token()),
                 () -> purchaseWaitingQueuePort.releaseProcessing(saleId, claim.waitingEntryId(), claim.token()));
     }

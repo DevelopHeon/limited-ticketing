@@ -2,25 +2,36 @@ package com.example.limitedticketing.integration.purchasewaiting;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doCallRealMethod;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-
 import com.example.limitedticketing.inventory.domain.model.Inventory;
 import com.example.limitedticketing.inventory.domain.repository.InventoryRepository;
 import com.example.limitedticketing.member.domain.model.Member;
 import com.example.limitedticketing.member.domain.repository.MemberRepository;
-import com.example.limitedticketing.purchase.domain.model.PurchaseStatus;
-import com.example.limitedticketing.purchase.domain.repository.PurchaseRepository;
-import com.example.limitedticketing.purchase.application.port.in.PurchaseCommandFacade;
+import com.example.limitedticketing.purchase.application.port.in.PurchaseCommandPort;
 import com.example.limitedticketing.purchase.application.port.in.dto.PurchaseReservation;
 import com.example.limitedticketing.purchase.application.port.in.dto.ReservePurchaseInput;
-import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingStatus;
-import com.example.limitedticketing.purchasewaiting.application.usecase.ClaimPurchaseWaitingUseCase;
-import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ClaimPurchaseWaitingCommand;
-import com.example.limitedticketing.purchasewaiting.application.usecase.RecoverPurchaseWaitingUseCase;
+import com.example.limitedticketing.purchase.domain.repository.PurchaseRepository;
 import com.example.limitedticketing.purchasewaiting.application.port.in.worker.PurchaseWaitingWorkerPort;
+import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingQueuePort;
+import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingTaskExecutionPort;
+import com.example.limitedticketing.purchasewaiting.application.port.out.dto.PurchaseWaitingClaim;
+import com.example.limitedticketing.purchasewaiting.application.service.DispatchPurchaseWaitingService;
+import com.example.limitedticketing.purchasewaiting.application.usecase.ClaimPurchaseWaitingUseCase;
+import com.example.limitedticketing.purchasewaiting.application.usecase.ProcessPurchaseWaitingUseCase;
+import com.example.limitedticketing.purchasewaiting.application.usecase.RecoverPurchaseWaitingUseCase;
+import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ClaimPurchaseWaitingCommand;
+import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ProcessPurchaseWaitingCommand;
+import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingEntry;
+import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingStatus;
+import com.example.limitedticketing.purchasewaiting.domain.repository.PurchaseWaitingEntryRepository;
 import com.example.limitedticketing.sale.domain.model.Product;
 import com.example.limitedticketing.sale.domain.model.SaleProduct;
 import com.example.limitedticketing.sale.domain.repository.ProductRepository;
@@ -29,51 +40,37 @@ import com.example.limitedticketing.shared.vo.Money;
 import com.example.limitedticketing.shared.vo.SalePeriod;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.example.limitedticketing.purchasewaiting.application.usecase.ProcessPurchaseWaitingUseCase;
-import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ProcessPurchaseWaitingCommand;
-import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingQueuePort;
-import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingTaskExecutionPort;
-import com.example.limitedticketing.purchasewaiting.application.port.out.dto.PurchaseWaitingClaim;
-import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingEntry;
-import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingEntryQueryPort;
-import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingEntryCommandPort;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
-import java.time.Instant;
-import com.example.limitedticketing.purchasewaiting.application.service.DispatchPurchaseWaitingService;
-import java.time.Clock;
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.doCallRealMethod;
-import org.springframework.data.redis.RedisConnectionFailureException;
-import java.util.concurrent.RejectedExecutionException;
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.UUID;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -127,7 +124,7 @@ class PurchaseWaitingIntegrationTest {
     private PurchaseRepository purchaseRepository;
 
     @Autowired
-    private PurchaseCommandFacade purchaseCommandFacade;
+    private PurchaseCommandPort purchaseCommandPort;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -135,13 +132,11 @@ class PurchaseWaitingIntegrationTest {
     @MockitoSpyBean
     private PurchaseWaitingQueuePort purchaseWaitingQueuePort;
     @MockitoSpyBean
-    private PurchaseWaitingEntryQueryPort purchaseWaitingEntryQueryPort;
+    private PurchaseWaitingEntryRepository purchaseWaitingEntryRepository;
     @Autowired
     private ProcessPurchaseWaitingUseCase processPurchaseWaitingUseCase;
     @Autowired
     private PurchaseWaitingTaskExecutionPort purchaseWaitingTaskExecutionPort;
-    @Autowired
-    private PurchaseWaitingEntryCommandPort purchaseWaitingEntryCommandPort;
 
     @Autowired
     private PlatformTransactionManager transactions;
@@ -338,7 +333,7 @@ class PurchaseWaitingIntegrationTest {
         String processingKey = "processing:sale:" + fixture.saleProductId();
         stringRedisTemplate.opsForZSet().remove(waitingKey, entry.id().toString());
         stringRedisTemplate.opsForZSet().add(processingKey, entry.id().toString(), 0);
-        PurchaseReservation committedPurchase = purchaseCommandFacade.reserve(
+        PurchaseReservation committedPurchase = purchaseCommandPort.reserve(
             new ReservePurchaseInput(fixture.firstMemberId(), fixture.saleProductId(), requestKey)
         );
 
@@ -486,7 +481,7 @@ class PurchaseWaitingIntegrationTest {
         jdbcTemplate.update("update reservation_queue_entries set lease_until = ? where id = ?",
             LocalDateTime.of(2000, 1, 1, 0, 0), entry.id());
         recoverPurchaseWaitingUseCase.recover();
-        PurchaseWaitingEntry waiting = purchaseWaitingEntryQueryPort.findById(entry.id()).orElseThrow();
+        PurchaseWaitingEntry waiting = purchaseWaitingEntryRepository.findById(entry.id()).orElseThrow();
         PurchaseWaitingClaim second = purchaseWaitingQueuePort.claimNext(fixture.saleProductId(), 10, 1, Instant.now()).get(0);
         claimPurchaseWaitingUseCase.claim(new ClaimPurchaseWaitingCommand(entry.id(), second.token())).orElseThrow();
 
@@ -494,7 +489,7 @@ class PurchaseWaitingIntegrationTest {
         purchaseWaitingQueuePort.releaseProcessing(fixture.saleProductId(), entry.id(), first.token());
         purchaseWaitingQueuePort.requeue(waiting, first.token());
 
-        assertThat(purchaseWaitingEntryQueryPort.findById(entry.id()).orElseThrow().getProcessingToken()).isEqualTo(second.token());
+        assertThat(purchaseWaitingEntryRepository.findById(entry.id()).orElseThrow().getProcessingToken()).isEqualTo(second.token());
         assertThat(stringRedisTemplate.opsForZSet().zCard("processing:sale:" + fixture.saleProductId())).isEqualTo(1);
         assertThat(stringRedisTemplate.opsForZSet().zCard("waiting:sale:" + fixture.saleProductId())).isZero();
         assertThat(jdbcTemplate.queryForObject("select count(*) from purchases where sale_product_id = ?",
@@ -519,18 +514,18 @@ class PurchaseWaitingIntegrationTest {
         ExecutorService executorService = Executors.newSingleThreadExecutor();
         try {
             Future<?> running = executorService.submit(() -> new TransactionTemplate(transactions).executeWithoutResult(status -> {
-                purchaseWaitingEntryQueryPort.findByIdForUpdate(entry.id()).orElseThrow();
+                purchaseWaitingEntryRepository.findByIdForUpdate(entry.id()).orElseThrow();
                 locked.countDown();
                 awaitLatch(release);
             }));
             assertThat(locked.await(5, TimeUnit.SECONDS)).isTrue();
             recoverPurchaseWaitingUseCase.recover();
-            assertThat(purchaseWaitingEntryQueryPort.findById(entry.id()).orElseThrow().ownsAttempt(claim.token())).isTrue();
+            assertThat(purchaseWaitingEntryRepository.findById(entry.id()).orElseThrow().ownsAttempt(claim.token())).isTrue();
             assertThat(stringRedisTemplate.opsForZSet().zCard("processing:sale:" + fixture.saleProductId())).isEqualTo(1);
             release.countDown();
             running.get(5, TimeUnit.SECONDS);
             recoverPurchaseWaitingUseCase.recover();
-            assertThat(purchaseWaitingEntryQueryPort.findById(entry.id()).orElseThrow().getStatus()).isEqualTo(PurchaseWaitingStatus.WAITING);
+            assertThat(purchaseWaitingEntryRepository.findById(entry.id()).orElseThrow().getStatus()).isEqualTo(PurchaseWaitingStatus.WAITING);
             assertThat(purchaseWaitingQueuePort.findPosition(fixture.saleProductId(), entry.id())).isPresent();
         } finally {
             release.countDown();
@@ -558,10 +553,10 @@ class PurchaseWaitingIntegrationTest {
             assertThat(running.await(5, TimeUnit.SECONDS)).isTrue();
             purchaseWaitingWorkerPort.dispatchWaitingEntries();
             for (QueueEntry entry : List.of(firstEntry, secondEntry)) {
-                PurchaseWaitingEntry persisted = purchaseWaitingEntryQueryPort.findById(entry.id()).orElseThrow();
+                PurchaseWaitingEntry persisted = purchaseWaitingEntryRepository.findById(entry.id()).orElseThrow();
                 assertThat(persisted.getStatus()).isEqualTo(PurchaseWaitingStatus.WAITING);
                 assertThat(purchaseWaitingQueuePort.findPosition(persisted.getSaleProductId(), entry.id())).isPresent();
-                assertThat(purchaseWaitingEntryQueryPort.countProcessing(persisted.getSaleProductId())).isZero();
+                assertThat(purchaseWaitingEntryRepository.countProcessing(persisted.getSaleProductId())).isZero();
             }
         } finally {
             release.countDown();
@@ -578,18 +573,18 @@ class PurchaseWaitingIntegrationTest {
             Member member = memberRepository.save(Member.register("full-worker-" + System.nanoTime(), "동시 처리 회원"));
             entries.add(enqueue(fixture.saleProductId(), member.getId(), issuePurchaseKey(member.getId())));
         }
-        doReturn(List.of(fixture.saleProductId())).when(purchaseWaitingEntryQueryPort).findSaleProductIdsWithWaitingEntries();
+        doReturn(List.of(fixture.saleProductId())).when(purchaseWaitingEntryRepository).findSaleProductIdsWithWaitingEntries();
         CountDownLatch outerTransactions = new CountDownLatch(10);
         doAnswer(invocation -> {
             Object locked = invocation.callRealMethod();
             outerTransactions.countDown();
             awaitLatch(outerTransactions);
             return locked;
-        }).when(purchaseWaitingEntryQueryPort).findByIdForUpdate(any(UUID.class));
+        }).when(purchaseWaitingEntryRepository).findByIdForUpdate(any(UUID.class));
         purchaseWaitingWorkerPort.dispatchWaitingEntries();
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
             for (QueueEntry entry : entries) {
-                assertThat(purchaseWaitingEntryQueryPort.findById(entry.id()).orElseThrow().getStatus()).isEqualTo(PurchaseWaitingStatus.RESERVED);
+                assertThat(purchaseWaitingEntryRepository.findById(entry.id()).orElseThrow().getStatus()).isEqualTo(PurchaseWaitingStatus.RESERVED);
             }
         });
         assertThat(inventoryRepository.findById(fixture.inventoryId()).orElseThrow().getReservedQuantity()).isEqualTo(10);
@@ -600,7 +595,7 @@ class PurchaseWaitingIntegrationTest {
     void rejectedDispatchRestoresTheOriginalWaitingEntry() throws Exception {
         Fixture fixture = createFixture(1);
         QueueEntry entry = enqueue(fixture.saleProductId(), fixture.firstMemberId(), issuePurchaseKey(fixture.firstMemberId()));
-        PurchaseWaitingEntry original = purchaseWaitingEntryQueryPort.findById(entry.id()).orElseThrow();
+        PurchaseWaitingEntry original = purchaseWaitingEntryRepository.findById(entry.id()).orElseThrow();
         PurchaseWaitingTaskExecutionPort purchaseWaitingTaskExecutionPort = new PurchaseWaitingTaskExecutionPort() {
             @Override
             public int availableSlots() {
@@ -611,15 +606,15 @@ class PurchaseWaitingIntegrationTest {
                 throw new RejectedExecutionException("Deliberate capacity race");
             }
         };
-        DispatchPurchaseWaitingService dispatchPurchaseWaitingService = new DispatchPurchaseWaitingService(purchaseWaitingEntryQueryPort, purchaseWaitingQueuePort,
+        DispatchPurchaseWaitingService dispatchPurchaseWaitingService = new DispatchPurchaseWaitingService(purchaseWaitingEntryRepository, purchaseWaitingQueuePort,
             claimPurchaseWaitingUseCase, processPurchaseWaitingUseCase, purchaseWaitingTaskExecutionPort,
             Clock.systemDefaultZone(), 10, 1);
         // Earlier test fixtures may also be waiting; rotate through each sale once.
-        int saleCount = purchaseWaitingEntryQueryPort.findSaleProductIdsWithWaitingEntries().size();
+        int saleCount = purchaseWaitingEntryRepository.findSaleProductIdsWithWaitingEntries().size();
         for (int index = 0; index < saleCount; index++) {
             dispatchPurchaseWaitingService.dispatchWaitingEntries();
         }
-        PurchaseWaitingEntry restored = purchaseWaitingEntryQueryPort.findById(entry.id()).orElseThrow();
+        PurchaseWaitingEntry restored = purchaseWaitingEntryRepository.findById(entry.id()).orElseThrow();
         assertThat(restored.getStatus()).isEqualTo(PurchaseWaitingStatus.WAITING);
         assertThat(restored.getProcessingToken()).isNull();
         assertThat(restored.getQueueSequence()).isEqualTo(original.getQueueSequence());
@@ -634,7 +629,7 @@ class PurchaseWaitingIntegrationTest {
         doThrow(new RedisConnectionFailureException("Deliberate post-commit outage"))
             .when(purchaseWaitingQueuePort).enqueue(any(PurchaseWaitingEntry.class));
         QueueEntry entry = enqueue(fixture.saleProductId(), fixture.firstMemberId(), issuePurchaseKey(fixture.firstMemberId()));
-        assertThat(purchaseWaitingEntryQueryPort.findById(entry.id()).orElseThrow().getStatus()).isEqualTo(PurchaseWaitingStatus.WAITING);
+        assertThat(purchaseWaitingEntryRepository.findById(entry.id()).orElseThrow().getStatus()).isEqualTo(PurchaseWaitingStatus.WAITING);
         assertThat(purchaseWaitingQueuePort.findPosition(fixture.saleProductId(), entry.id())).isEmpty();
         doCallRealMethod().when(purchaseWaitingQueuePort).enqueue(any(PurchaseWaitingEntry.class));
         recoverPurchaseWaitingUseCase.recover();
@@ -659,15 +654,15 @@ class PurchaseWaitingIntegrationTest {
             "processing-tokens:sale:" + fixture.saleProductId()));
         PurchaseWaitingClaim extra = purchaseWaitingQueuePort.claimNext(fixture.saleProductId(), 10, 1, Instant.now()).get(0);
         assertThat(claimPurchaseWaitingUseCase.claim(new ClaimPurchaseWaitingCommand(extra.waitingEntryId(), extra.token()))).isEmpty();
-        assertThat(purchaseWaitingEntryQueryPort.countProcessing(fixture.saleProductId())).isEqualTo(10);
-        PurchaseWaitingEntry waiting = purchaseWaitingEntryQueryPort.findById(extra.waitingEntryId()).orElseThrow();
+        assertThat(purchaseWaitingEntryRepository.countProcessing(fixture.saleProductId())).isEqualTo(10);
+        PurchaseWaitingEntry waiting = purchaseWaitingEntryRepository.findById(extra.waitingEntryId()).orElseThrow();
         assertThat(waiting.getStatus()).isEqualTo(PurchaseWaitingStatus.WAITING);
         purchaseWaitingQueuePort.requeue(waiting, extra.token());
         jdbcTemplate.update("update reservation_queue_entries set lease_until = ? where sale_product_id = ? and status = 'PROCESSING'",
             LocalDateTime.of(2000, 1, 1, 0, 0), fixture.saleProductId());
         recoverPurchaseWaitingUseCase.recover();
         for (QueueEntry entry : entries) {
-            Long memberId = purchaseWaitingEntryQueryPort.findById(entry.id()).orElseThrow().getMemberId();
+            Long memberId = purchaseWaitingEntryRepository.findById(entry.id()).orElseThrow().getMemberId();
             awaitCompletion(entry.id(), memberId);
         }
         assertThat(inventoryRepository.findById(fixture.inventoryId()).orElseThrow().getReservedQuantity()).isEqualTo(10);

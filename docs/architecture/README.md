@@ -47,6 +47,7 @@ PostgreSQL이 구매·재고·대기 요청의 최종 상태와 Outbox를 소유
 | 알고 싶은 내용 | 소유 문서 |
 |---|---|
 | 코드 모듈·공개 API·계층·DTO·트랜잭션 | [모듈 경계와 내부 설계](module-boundaries.md) |
+| 구현 기능과 HTTP·대기·예약·결제·복구의 호출 순서 | [주요 시퀀스](business-flows.md) |
 | 실제 로컬 프로세스와 Docker 배치 | [Deployment](deployment.md) |
 | 대기 처리 내부 구성·상태·복구 | [구매 대기 설계](purchase-waiting.md#c3--구매-대기-컴포넌트) |
 | 왜 이 구조와 저장소 경계를 선택했는가 | [ADR 목록](../adr/README.md) |

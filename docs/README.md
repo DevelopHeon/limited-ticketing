@@ -4,7 +4,7 @@
 
 | 알고 싶은 내용 | 확인할 곳 |
 |---|---|
-| 지금 어떻게 구현되어 있는가? | [architecture/](architecture/README.md): C4, [모듈·계층·영속성 경계](architecture/module-boundaries.md), [구매 대기 흐름](architecture/purchase-waiting.md) |
+| 지금 어떻게 구현되어 있는가? | [architecture/](architecture/README.md): C4, [모듈·계층·영속성 경계](architecture/module-boundaries.md), [주요 시퀀스](architecture/business-flows.md), [구매 대기 흐름](architecture/purchase-waiting.md) |
 | 왜 이 기술과 구조를 선택했는가? | [adr/](adr/README.md): 결정의 배경·대안·비용 |
 | 어떻게 실행하고 검증하는가? | [development/](development/README.md), [테스트 기준](development/testing.md), [performance/](performance/load-testing.md) |
 | 앞으로 무엇을 구현할 것인가? | [plans/roadmap.md](plans/roadmap.md), [제품 요구사항과 단계별 인수 기준](plans/2026-10-15-flash-sale-implementation-plan.md) |

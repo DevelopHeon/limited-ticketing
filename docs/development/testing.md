@@ -21,9 +21,13 @@
 | `PaymentLifecycleIntegrationTest` | 결제 실패·재시도·승인, 소유권·만료와 구매 및 재고 전이 검증 |
 | `SaleProductManagementIntegrationTest` | 판매 생성, 상태 전이, 재고 생성, 목록/상세 조회 검증 |
 | `ObservabilityIntegrationTest` | 실제 HTTP의 지표 접근 401/403/200, 업무 API 인증 유지, histogram·JVM·Hikari 노출 검증 |
-| `PurchaseWaitingIntegrationTest` | 실제 DB/Redis에서 순번 유실·동점 cursor·단일 claim·이전 토큰·실행 중 lease 복구·전역 슬롯·실행 거부·커밋 후 등록 실패·전체 Worker 연결 검증 |
+| `PurchaseWaitingIntegrationTest` | 실제 DB/Redis에서 순번 유실·동점 cursor·단일 claim·이전 토큰·실행 중 lease 복구·전역 입장 슬롯·DB 입장 거부·커밋 후 등록 실패·전체 Worker 연결 검증 |
 
-`PurchaseWaitingProtectionIntegrationTest`는 동시 수용량·동시 멱등 재전송·1초 속도 제한·Redis 장애 전후·기본 직접 HTTP 차단을 검증한다. 기존 직접 예약 HTTP·결제 통합 테스트는 `test,baseline`으로 기존 예약 계약을 검증한다. `PurchaseWaitingExecutorTest`는 실행 초과의 즉시 거부와 내부 버퍼 0을 확인한다.
+`PurchaseWaitingProtectionIntegrationTest`는 동시 수용량·동시 멱등 재전송·1초 속도 제한·Redis 장애 전후·기본 직접 HTTP 차단을 검증한다. 기존 직접 예약 HTTP·결제 통합 테스트는 `test,baseline`으로 기존 예약 계약을 검증한다. 기존 Executor 전용 검증은 Kafka 전달 대기를 포함하는 DB 입장 상한·입장 거부 후 Redis 반환 검증으로 교체했다.
+
+`PurchaseWaitingOutboxIntegrationTest`는 실제 PostgreSQL/Redis에서 입장+Outbox 원자성, 재시도 시각과 payload 보존, SKIP LOCKED, 관리자 인증·동시 재처리·이전 token·실행 예산 소진 복구를 검증한다.
+
+`PurchaseWaitingKafkaIntegrationTest`는 실제 PostgreSQL/Redis/Kafka로 HTTP→Outbox→Consumer→예약, 중복 소비, ACK 후 DB 롤백의 재발행, poison DLT, 총 3회 기술 실패·기존 구매 복원, DB 확인/DLT 발행 실패 시 정지·offset 유지·복구를 검증한다. 실패 경계는 Spy로 주입하지만 실제 Kafka 전송과 group offset을 검사한다. 테스트 Kafka는 RF1·minISR1이므로 복제 내결함성을 검증한 것으로 표현하지 않는다. 로컬 RF3·minISR2 Broker 장애는 별도 실험으로 확인한다. 일반 업무 통합 테스트에서는 listener와 polling을 멈추고 Port를 통해 실행 경계를 명시적으로 구동하며, 실제 Kafka 연결 검증과 구분한다.
 
 `ModularityDocumentationTests`는 Spring Modulith `Documenter`로 코드 기준의 모듈 문서를 생성한다.
 

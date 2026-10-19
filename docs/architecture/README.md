@@ -1,6 +1,6 @@
 # 시스템 아키텍처
 
-Limited Ticketing은 한정 수량 상품의 판매·구매 예약·결제를 처리하는 **모듈러 모놀리스**다. 업무 모듈은 하나의 Spring Boot 프로세스와 PostgreSQL을 공유한다. C4는 사용자가 보는 시스템 → 실행 구성 → 필요한 부분의 내부 구성 순으로 설명한다.
+Limited Ticketing은 한정 수량 상품의 판매·구매 예약·결제를 처리하는 **모듈러 모놀리스**다. 업무 모듈은 같은 Spring Boot 애플리케이션 코드와 PostgreSQL을 공유한다. 기본 통합 실행과 API/Worker 역할별 실행을 지원한다. C4는 사용자가 보는 시스템 → 실행 구성 → 필요한 부분의 내부 구성 순으로 설명한다.
 
 ## C1 · System Context
 
@@ -21,22 +21,26 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    member["회원 / 구매자"]
-    admin["판매 관리자"]
+    member["회원 / 관리자"]
     subgraph system["Limited Ticketing 시스템"]
-        app["Spring Boot / Java 17<br/>HTTP API · 스케줄러<br/>비동기 구매 Worker"]
-        db[("PostgreSQL 17<br/>회원·판매·재고<br/>구매·결제·대기 상태")]
-        redis[("Redis 7<br/>대기 위치·시도 토큰<br/>waiting / processing ZSET")]
-        app -->|"JDBC · 업무 상태 조회와 트랜잭션"| db
-        app -->|"Redis 명령·Lua · 대기 선택과 처리 슬롯 claim"| redis
+        api["API · Spring Boot / Java 17<br/>HTTP 접수·조회·구매·결제"]
+        worker["Worker · 같은 실행 산출물<br/>Dispatcher·Outbox Publisher·Consumer·복구"]
+        db[("PostgreSQL 17<br/>업무 원장·예약 Outbox")]
+        redis[("Redis 7<br/>waiting / processing ZSET·token")]
+        kafka[("Kafka<br/>예약 요청·DLT")]
+        api -->|"업무 transaction"| db
+        api -->|"입구 보호·위치·등록"| redis
+        worker -->|"입장·실행·복구·Outbox transaction"| db
+        worker -->|"claim·복원·슬롯 반환"| redis
+        worker -->|"Outbox 발행"| kafka
+        kafka -->|"예약 요청 소비"| worker
     end
-    member -->|"HTTP / JSON"| app
-    admin -->|"HTTP / JSON"| app
+    member -->|"HTTP / JSON"| api
 ```
 
-[C4 Container](https://c4model.com/diagrams/container)는 실행 애플리케이션이나 데이터 저장소를 뜻한다. `member`, `sale`, `inventory`, `purchase`, `payment`, `purchasewaiting`은 이 애플리케이션 안의 코드 모듈이며 독립 Container가 아니다. Worker도 현재 같은 프로세스에서 실행한다.
+[C4 Container](https://c4model.com/diagrams/container)는 실행 애플리케이션이나 데이터 저장소를 뜻한다. 위 그림은 역할을 나눠 실행할 때의 논리적 구성이다. 기본 실행은 API와 Worker를 한 프로세스에 함께 배치한다. 업무 모듈은 독립 Container가 아니며 두 실행 역할은 같은 코드·DB를 공유한다.
 
-PostgreSQL이 구매·재고·대기 요청의 최종 상태를 소유한다. Redis는 처리 시작 순서와 상품별 처리 슬롯을 관리하며, 재고 원장으로 사용하지 않는다. 프로세스 사이의 Kafka 전달이나 Outbox는 아직 구현하지 않았다.
+PostgreSQL이 구매·재고·대기 요청의 최종 상태와 Outbox를 소유한다. Redis는 입장 선택과 위치 조회를, Kafka는 입장된 예약 작업의 전달을 담당한다. 전달 보장은 at-least-once이며 DB의 멱등성·token 검사가 업무 중복 효과를 막는다. 선택 이유와 비용은 [ADR 0010](../adr/0010-kafka-reservation-outbox.md)을 따른다.
 
 ## 상세 설계와 읽는 순서
 

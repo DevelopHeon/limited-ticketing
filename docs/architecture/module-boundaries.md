@@ -49,7 +49,7 @@ limited-ticketing
 
 모듈 간 Aggregate 참조는 객체 그래프가 아니라 식별자로 표현한다. 예를 들어 `Purchase`는 `memberId`, `saleProductId`만 보관하며 `Member`, `SaleProduct` 엔티티를 직접 참조하지 않는다.
 
-`purchasewaiting`은 기술적 범용 큐가 아니라 구매 대기 요청의 수명 주기를 소유한다. 구매 대기 접수·조회·처리·복구와 실제 구매 예약의 책임을 분리하고, 예약 자체는 `purchase`의 공개 Facade에 위임한다. Java 패키지와 Gradle 모듈명은 이 업무를 표현하며 기존 HTTP 경로, DB 테이블, Redis 키와 `limited-ticketing.queue` 설정은 유지한다.
+`purchasewaiting`은 기술적 범용 큐가 아니라 구매 대기 요청의 수명 주기를 소유한다. 구매 대기 접수·조회·처리·복구와 실제 구매 예약의 책임을 분리하고, 예약 자체는 `purchase`의 공개 Input Port에 위임한다. Java 패키지와 Gradle 모듈명은 이 업무를 표현하며 기존 HTTP 경로, DB 테이블, Redis 키와 `limited-ticketing.queue` 설정은 유지한다.
 
 ## 모듈 경계와 의존 규칙
 
@@ -68,7 +68,7 @@ purchasewaiting -> shared::api, shared::exception,
              member::api, sale::api, purchase::api
 ```
 
-`::api`, `::vo`, `::exception`, `::events`는 Spring Modulith Named Interface다. 모듈 전체가 아니라 필요한 공개 패키지만 노출한다.
+`::api`, `::vo`, `::exception`은 Spring Modulith Named Interface다. 모듈 전체가 아니라 필요한 공개 패키지만 노출한다.
 
 ```java
 @ApplicationModule(allowedDependencies = {
@@ -113,7 +113,7 @@ package com.example.limitedticketing.member.application.port.in;
     └── out/...                  Redis·이벤트·실행기 등 실제 필요한 구현
 ```
 
-Controller·Scheduler 자체가 Input Adapter이며 Input Port를 호출한다. 일반 진입 PortService는 Input/Output과 내부 DTO를 변환해 UseCase에 연결한다. 실제 여러 UseCase를 조합하는 PurchaseWaitingCommandFacade만 facade에 둔다. Application 내부 업무 호출은 UseCase를 사용한다. 의존성 필드·생성자·테스트에는 Port·UseCase·Repository·Service·Adapter 등 타입의 역할 접미사를 유지한다.
+Controller·Consumer·Scheduler 자체가 Input Adapter이며 Input Port를 호출한다. 일반 진입 PortService는 Input/Output과 내부 DTO를 변환해 UseCase에 연결한다. 여러 UseCase를 순서대로 조합하는 PurchaseWaitingCommandFacade와 PurchaseWaitingReservationFacade는 facade에 둔다. Application 내부 업무 호출은 UseCase를 사용한다. 의존성 필드·생성자·테스트에는 Port·UseCase·Repository·Service·Adapter 등 타입의 역할 접미사를 유지한다.
 
 | Application 구현 | 역할 | 예시 |
 |---|---|---|
@@ -122,6 +122,8 @@ Controller·Scheduler 자체가 Input Adapter이며 Input Port를 호출한다. 
 | 업무 Service | 내부 UseCase 구현, transaction·Domain·Repository·Output Port 사용 | InventoryCommandService |
 
 PortService와 Facade는 같은 Application 계층의 진입 구현이다. Facade 앞에 별도 PortService를 추가하지 않는다. PortService는 이 프로젝트에서 사용하는 Input Port 구현 명명 규칙이며 새로운 계층은 아니다.
+
+PortService가 여러 UseCase를 주입받더라도 메서드마다 하나씩 호출하면 Facade로 보지 않는다. ReservationFacade는 실행 시작·예약·실패 기록 UseCase의 각 transaction을 조합하고, 결과 확정 후 Redis 슬롯 해제를 Output Port로 호출한다. Facade 전체를 하나의 transaction으로 묶지 않는다. Input Adapter가 Input Port를 직접 구현하도록 강제하지 않으며, Output Adapter는 자신의 Output Port 또는 Domain Repository를 구현한다.
 
 ### Aggregate 영속성과 Application 출력 계약
 
@@ -182,7 +184,7 @@ reservation_queue_entries(member_id, purchase_request_key)
                                                 # 동일 대기열 진입 재시도
 ```
 
-활성 구매와 활성 대기열 항목은 별도 제약으로 막는다. 구매는 `active_purchase_key`를 사용하고, 대기열은 `WAITING`, `PROCESSING` 상태에만 적용되는 `(member_id, sale_product_id)` 부분 유니크 인덱스를 사용한다.
+활성 구매와 활성 대기열 항목은 별도 제약으로 막는다. 구매는 `active_purchase_key`를 사용하고, 대기열은 `WAITING`, `DISPATCHED`, `PROCESSING` 상태에만 적용되는 `(member_id, sale_product_id)` 부분 유니크 인덱스를 사용한다.
 
 재고 예약은 조회 후 저장 방식이 아니라 조건부 원자 UPDATE로 수행한다. `available_quantity >= 요청 수량`일 때만 `available`을 줄이고 `reserved`를 늘린다. 영향 행 수가 0이면 재고 부족으로 처리하므로 동시 요청에서도 음수 재고와 유실 갱신을 방지한다.
 
@@ -190,20 +192,11 @@ reservation_queue_entries(member_id, purchase_request_key)
 
 결제 시도의 승인·실패도 `READY`인 행만 조건부 UPDATE로 전이한다. 실패와 승인이 동시에 도착해도 완료된 결제 상태를 덮어쓰지 않으며, 승인 요청이 결제 상태 전이에 실패하면 같은 트랜잭션의 구매 완료와 재고 확정도 롤백한다.
 
-### 도메인 이벤트
+### 구매 예약과 메시징
 
-구매 예약 이벤트는 트랜잭션 커밋 후 Spring ApplicationEventPublisher로 발행한다. `purchase.domain.event`는 `events` Named Interface로 공개된다.
+구매 예약은 같은 DB transaction에서 구매 원장과 재고를 갱신한다. 운영 구독자가 없던 Spring `PurchaseReserved` 이벤트와 발행 Port·Adapter는 제거했다. 현재 구매 모듈은 예약 이벤트를 발행하지 않는다.
 
-```text
-Aggregate 상태 변경
-  -> Application Service가 저장
-  -> 트랜잭션 커밋 후 Spring 이벤트 발행
-  -> 구독자가 등록된 경우 같은 프로세스의 후속 처리
-```
-
-프로세스 내부 이벤트는 외부 메시지 브로커가 아니다. 프로세스 종료에도 반드시 전달되어야 하는 이벤트, 소비자 독립 확장, 재시도와 모니터링이 필요해지면 Transactional Outbox와 Kafka를 별도 단계로 도입한다.
-
-현재 운영 코드에는 `PurchaseReserved` 이벤트를 소비하는 후처리 Listener가 없으며, 테스트에서 발행 여부를 검증한다.
+Kafka의 예약 실행 요청은 구매 대기 모듈이 소유하는 별도 계약이다. 구매 예약이 완료됐다는 사실 알림과 구분하며, 전달·Outbox 계약은 [3단계 스펙](../plans/2026-10-19-stage-3-kafka-outbox.md)을 따른다.
 
 ## 구매 대기와 실제 구매의 경계
 

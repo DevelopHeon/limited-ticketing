@@ -146,7 +146,7 @@ class Environment:
 
     def ensure_idle(self):
         counts = self.sql(query="""SELECT
-            (SELECT COUNT(*) FROM reservation_queue_entries WHERE status IN ('WAITING','PROCESSING')) +
+            (SELECT COUNT(*) FROM reservation_queue_entries WHERE status IN ('WAITING','DISPATCHED','PROCESSING')) +
             (SELECT COUNT(*) FROM purchases WHERE status = 'PENDING_PAYMENT')""")
         if int(counts) != 0:
             raise RuntimeError('Target database has active waiting entries or pending purchases; resolve their owning requests first')
@@ -154,7 +154,7 @@ class Environment:
     def cleanup(self, fixture, snapshot):
         if snapshot.get('redisError'):
             return {'status': 'SKIPPED', 'reason': 'Redis evidence unavailable; fixture retained for investigation'}
-        if sum(snapshot.get('queue', {}).get(key, 0) for key in ('WAITING', 'PROCESSING')):
+        if sum(snapshot.get('queue', {}).get(key, 0) for key in ('WAITING', 'DISPATCHED', 'PROCESSING')):
             return {'status': 'SKIPPED', 'reason': 'Active requests retained for investigation'}
         allowed = {item['memberId'] for item in fixture['members']}
         if any(purchase['memberId'] not in allowed for purchase in snapshot.get('pendingPurchases', [])):

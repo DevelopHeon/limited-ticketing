@@ -24,6 +24,16 @@ public class PurchaseWaitingPersistenceAdapter implements PurchaseWaitingEntryRe
     }
 
     @Override
+    public long countInFlight() {
+        return purchaseWaitingJpaRepository.countByStatusIn(List.of(PurchaseWaitingStatus.DISPATCHED, PurchaseWaitingStatus.PROCESSING));
+    }
+
+    @Override
+    public void lockAdmission() {
+        purchaseWaitingJpaRepository.lockAdmission();
+    }
+
+    @Override
     public void lockQueue(Long saleProductId) {
         purchaseWaitingJpaRepository.lockQueue(saleProductId);
     }
@@ -31,18 +41,18 @@ public class PurchaseWaitingPersistenceAdapter implements PurchaseWaitingEntryRe
     @Override
     public long countActive(Long saleProductId) {
         return purchaseWaitingJpaRepository.countBySaleProductIdAndStatusIn(
-            saleProductId, List.of(PurchaseWaitingStatus.WAITING, PurchaseWaitingStatus.PROCESSING));
+            saleProductId, List.of(PurchaseWaitingStatus.WAITING, PurchaseWaitingStatus.DISPATCHED, PurchaseWaitingStatus.PROCESSING));
     }
 
     @Override
-    public long countProcessing(Long saleProductId) {
+    public long countInFlight(Long saleProductId) {
         return purchaseWaitingJpaRepository.countBySaleProductIdAndStatusIn(
-            saleProductId, List.of(PurchaseWaitingStatus.PROCESSING));
+            saleProductId, List.of(PurchaseWaitingStatus.DISPATCHED, PurchaseWaitingStatus.PROCESSING));
     }
 
     @Override
-    public Optional<PurchaseWaitingEntry> claim(UUID id, UUID token, LocalDateTime now, LocalDateTime leaseUntil) {
-        return purchaseWaitingJpaRepository.claim(id, token, now, leaseUntil) == 1 ? findById(id) : Optional.empty();
+    public Optional<PurchaseWaitingEntry> dispatch(UUID id, UUID token, LocalDateTime now) {
+        return purchaseWaitingJpaRepository.dispatch(id, token, now) == 1 ? findById(id) : Optional.empty();
     }
 
     @Override
@@ -87,6 +97,11 @@ public class PurchaseWaitingPersistenceAdapter implements PurchaseWaitingEntryRe
     }
 
     @Override
+    public Optional<Long> findSaleProductId(UUID queueEntryId) {
+        return purchaseWaitingJpaRepository.findSaleProductId(queueEntryId);
+    }
+
+    @Override
     public Optional<PurchaseWaitingEntry> findById(UUID queueEntryId) {
         return purchaseWaitingJpaRepository.findById(queueEntryId).map(PurchaseWaitingJpaEntity::toDomain);
     }
@@ -123,10 +138,16 @@ public class PurchaseWaitingPersistenceAdapter implements PurchaseWaitingEntryRe
     }
 
     @Override
+    public boolean existsOtherActiveEntry(Long memberId, Long saleProductId, UUID excludedEntryId) {
+        return purchaseWaitingJpaRepository.existsByMemberIdAndSaleProductIdAndIdNotAndStatusIn(memberId, saleProductId,
+            excludedEntryId, List.of(PurchaseWaitingStatus.WAITING, PurchaseWaitingStatus.DISPATCHED, PurchaseWaitingStatus.PROCESSING));
+    }
+
+    @Override
     public boolean existsActiveEntry(Long saleProductId) {
         return purchaseWaitingJpaRepository.existsBySaleProductIdAndStatusIn(
             saleProductId,
-            List.of(PurchaseWaitingStatus.WAITING, PurchaseWaitingStatus.PROCESSING)
+            List.of(PurchaseWaitingStatus.WAITING, PurchaseWaitingStatus.DISPATCHED, PurchaseWaitingStatus.PROCESSING)
         );
     }
 }

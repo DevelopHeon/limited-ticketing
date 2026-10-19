@@ -8,6 +8,7 @@ import com.example.limitedticketing.sale.application.port.in.dto.SaleProductPage
 import com.example.limitedticketing.sale.infrastructure.adapter.in.web.response.SaleProductDetailResponse;
 import com.example.limitedticketing.sale.infrastructure.adapter.in.web.response.SaleProductPageResponse;
 import com.example.limitedticketing.shared.api.ApiResponse;
+import org.springframework.context.annotation.Profile;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@Profile("!worker")
 @RequestMapping("/api/sale-products")
 public class SaleProductQueryController {
 

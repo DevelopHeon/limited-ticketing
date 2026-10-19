@@ -3,9 +3,12 @@ package com.example.limitedticketing.purchasewaiting.application.service;
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingQueuePort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingQueueRecoveryPort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.SaleProductQueryPort;
+import com.example.limitedticketing.purchasewaiting.application.usecase.RecordPurchaseWaitingFailureUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.RecoverPurchaseWaitingUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.RestorePurchaseWaitingUseCase;
+import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ReservationExecutionCommand;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingEntry;
+import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingStatus;
 import com.example.limitedticketing.purchasewaiting.domain.repository.PurchaseWaitingEntryRepository;
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -33,6 +36,7 @@ public class RecoverPurchaseWaitingService implements RecoverPurchaseWaitingUseC
     private final SaleProductQueryPort saleProductQueryPort;
     private final Clock clock;
     private final RestorePurchaseWaitingUseCase restorePurchaseWaitingUseCase;
+    private final RecordPurchaseWaitingFailureUseCase recordPurchaseWaitingFailureUseCase;
     private final int recoveryBatchSize;
 
     public RecoverPurchaseWaitingService(
@@ -42,6 +46,7 @@ public class RecoverPurchaseWaitingService implements RecoverPurchaseWaitingUseC
         SaleProductQueryPort saleProductQueryPort,
         Clock clock,
         RestorePurchaseWaitingUseCase restorePurchaseWaitingUseCase,
+        RecordPurchaseWaitingFailureUseCase recordPurchaseWaitingFailureUseCase,
         @Value("${limited-ticketing.queue.worker.recovery-batch-size:1000}") int recoveryBatchSize
     ) {
         this.purchaseWaitingEntryRepository = purchaseWaitingEntryRepository;
@@ -50,6 +55,7 @@ public class RecoverPurchaseWaitingService implements RecoverPurchaseWaitingUseC
         this.saleProductQueryPort = saleProductQueryPort;
         this.clock = clock;
         this.restorePurchaseWaitingUseCase = restorePurchaseWaitingUseCase;
+        this.recordPurchaseWaitingFailureUseCase = recordPurchaseWaitingFailureUseCase;
         if (recoveryBatchSize <= 0) {
             throw new IllegalArgumentException("Recovery batch size must be positive");
         }
@@ -74,9 +80,13 @@ public class RecoverPurchaseWaitingService implements RecoverPurchaseWaitingUseC
 
             entries.forEach(entry -> {
                 UUID token = entry.getProcessingToken();
-                entry.returnToWaiting();
-                recovered.add(new RecoveredAttempt(entry, token));
-                purchaseWaitingEntryRepository.save(entry);
+                if (entry.getExecutionAttempts() >= PurchaseWaitingEntry.MAX_EXECUTION_ATTEMPTS) {
+                    recordPurchaseWaitingFailureUseCase.record(new ReservationExecutionCommand(null, entry.getId(), entry.getSaleProductId(), token));
+                    recovered.add(new RecoveredAttempt(purchaseWaitingEntryRepository.findById(entry.getId()).orElseThrow(), token));
+                } else {
+                    entry.returnToWaiting();
+                    recovered.add(new RecoveredAttempt(purchaseWaitingEntryRepository.save(entry), token));
+                }
             });
         }
     }
@@ -86,7 +96,13 @@ public class RecoverPurchaseWaitingService implements RecoverPurchaseWaitingUseC
             @Override
             public void afterCommit() {
                 try {
-                    recovered.forEach(attempt -> purchaseWaitingQueuePort.requeue(attempt.entry(), attempt.token()));
+                    recovered.forEach(attempt -> {
+                        if (attempt.entry().getStatus() == PurchaseWaitingStatus.WAITING) {
+                            purchaseWaitingQueuePort.requeue(attempt.entry(), attempt.token());
+                        } else {
+                            purchaseWaitingQueuePort.releaseProcessing(attempt.entry().getSaleProductId(), attempt.entry().getId(), attempt.token());
+                        }
+                    });
                     synchronizeRedis();
                 } catch (RuntimeException exception) {
                     log.error("Reservation queue recovery could not synchronize Redis", exception);

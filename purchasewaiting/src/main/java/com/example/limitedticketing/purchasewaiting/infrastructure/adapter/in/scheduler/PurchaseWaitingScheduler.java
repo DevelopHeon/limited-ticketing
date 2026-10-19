@@ -1,10 +1,12 @@
 package com.example.limitedticketing.purchasewaiting.infrastructure.adapter.in.scheduler;
 
 import com.example.limitedticketing.purchasewaiting.application.port.in.worker.PurchaseWaitingWorkerPort;
+import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
+@Profile("!api")
 public class PurchaseWaitingScheduler {
 
     private final PurchaseWaitingWorkerPort purchaseWaitingWorkerPort;

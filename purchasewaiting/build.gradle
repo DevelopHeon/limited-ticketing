@@ -9,10 +9,15 @@ dependencies {
     compileOnly rootProject.libraries.bootSecurity
     compileOnly rootProject.libraries.bootWeb
     compileOnly rootProject.libraries.modulithCore
+    compileOnly rootProject.libraries.springKafka
+    compileOnly rootProject.libraries.springJdbc
     compileOnly rootProject.libraries.jpaApi
     compileOnly rootProject.libraries.springDataJpa
     compileOnly rootProject.libraries.springDataRedis
 
+    testImplementation rootProject.libraries.springKafka
+    testImplementation rootProject.libraries.bootWeb
+    testImplementation rootProject.libraries.bootActuator
     testImplementation rootProject.libraries.bootTest
     testRuntimeOnly rootProject.libraries.junitPlatform
 }

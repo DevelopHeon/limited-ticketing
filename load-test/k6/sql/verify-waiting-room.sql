@@ -25,7 +25,7 @@ FROM inventories
 WHERE sale_product_id = :sale_product_id;
 
 SELECT
-    COUNT(*) FILTER (WHERE status IN ('WAITING', 'PROCESSING')) AS active_entries,
+    COUNT(*) FILTER (WHERE status IN ('WAITING', 'DISPATCHED', 'PROCESSING')) AS active_entries,
     COUNT(*) FILTER (WHERE status IN ('RESERVED', 'SOLD_OUT', 'FAILED')) AS completed_entries,
     COUNT(*) AS total_entries
 FROM reservation_queue_entries

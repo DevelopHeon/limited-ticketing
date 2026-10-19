@@ -47,6 +47,7 @@ class ProcessPurchaseWaitingServiceTest {
     @BeforeEach
     void createService() {
         entry = PurchaseWaitingEntry.enqueue(UUID.randomUUID(), 1L, 2L, "purchase-1", 42, NOW.minusMinutes(1));
+        entry.dispatch(token, NOW.minusMinutes(1));
         entry.beginProcessing(token, NOW.minusSeconds(1), NOW.plusSeconds(30));
         when(purchaseWaitingEntryRepository.findByIdForUpdate(entry.getId())).thenReturn(Optional.of(entry));
         processPurchaseWaitingService = new ProcessPurchaseWaitingService(purchaseWaitingEntryRepository, new ReserveWaitingPurchaseService(purchaseReservationPort), CLOCK);
@@ -65,6 +66,7 @@ class ProcessPurchaseWaitingServiceTest {
     @DisplayName("이미 만료된 처리 권한으로 새 구매 예약을 시작하지 않는다")
     void expiredAttemptCannotStartAReservation() {
         entry.returnToWaiting();
+        entry.dispatch(token, NOW.minusMinutes(1));
         entry.beginProcessing(token, NOW.minusSeconds(40), NOW.minusSeconds(10));
         assertThat(processPurchaseWaitingService.process(new ProcessPurchaseWaitingCommand(entry.getId(), token))).isEmpty();
         verify(purchaseReservationPort, never()).reserve(any(), any(), any());

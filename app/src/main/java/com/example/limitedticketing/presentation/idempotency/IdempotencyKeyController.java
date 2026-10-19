@@ -4,6 +4,7 @@ import com.example.limitedticketing.presentation.idempotency.request.IssueIdempo
 import com.example.limitedticketing.presentation.idempotency.response.IdempotencyKeyResponse;
 import com.example.limitedticketing.shared.api.ApiResponse;
 import jakarta.validation.Valid;
+import org.springframework.context.annotation.Profile;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@Profile("!worker")
 @RequestMapping("/api/idempotency-keys")
 public class IdempotencyKeyController {
 

@@ -1,10 +1,12 @@
 package com.example.limitedticketing.purchase.infrastructure.adapter.in.scheduler;
 
 import com.example.limitedticketing.purchase.application.port.in.worker.PurchaseExpirationPort;
+import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
+@Profile("!api")
 public class PurchaseExpirationScheduler {
 
     private final PurchaseExpirationPort purchaseExpirationPort;

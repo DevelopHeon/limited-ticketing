@@ -2,7 +2,7 @@
 
 한정 수량 상품을 사용자당 1개까지 예약하고 결제하는 과정을 구현하는 프로젝트입니다. 판매 시작 시점의 동시 요청을 안전하게 처리하고, 측정된 병목을 근거로 기술을 점진적으로 도입하는 것을 목표로 합니다.
 
-현재는 **Spring Modulith 기반 모듈러 모놀리스**로 구성되어 있으며, 모든 도메인 모듈이 하나의 Spring Boot 애플리케이션과 PostgreSQL 데이터베이스를 공유합니다. Redis ZSET은 대기 순서와 DB 진입 동시성만 제어하고, 구매 및 재고의 최종 정합성은 PostgreSQL이 보장합니다.
+현재는 **Spring Modulith 기반 모듈러 모놀리스**로 구성되어 있으며, 도메인 모듈이 같은 애플리케이션 코드와 PostgreSQL 데이터베이스를 공유합니다. 기본 실행은 API와 Worker를 함께 구동하고, 같은 산출물을 API/Worker 역할로 나눠 실행할 수 있습니다. Redis ZSET은 대기 순서와 DB 진입 동시성만 제어하고, 구매 및 재고의 최종 정합성은 PostgreSQL이 보장합니다.
 
 이 프로젝트는 처음부터 Redis나 메시지 브로커를 전제로 설계하지 않았습니다. PostgreSQL 조건부 원자 갱신으로 정합성을 확보한 뒤 k6로 병목을 측정했고, 실제 재고 행 경합이 관찰된 뒤에 Redis 대기열을 추가했습니다. 이후에도 Redis를 재고의 원장으로 사용하지 않고 장애 시 PostgreSQL 상태를 기준으로 복구할 수 있도록 경계를 유지합니다.
 
@@ -16,13 +16,14 @@
 - 조건부 원자 갱신을 이용한 동시 재고 예약
 - Redis ZSET 기반 상품별 대기열과 비동기 예약 처리
 - DB와 Redis 불일치 및 중단된 처리 항목 복구
+- Transactional Outbox·Kafka 예약 전달과 중복 소비 방어·관리자 재처리
 - Spring Modulith를 이용한 모듈 경계 검증 및 문서 생성
-- Testcontainers PostgreSQL/Redis 기반 통합 및 동시성 테스트
+- Testcontainers PostgreSQL/Redis/Kafka 기반 통합 및 동시성 테스트
 - k6 기반 판매 오픈 부하 테스트
 
 ## 아키텍처
 
-`app`이 모든 업무 모듈을 조립하고 하나의 Spring Boot 프로세스로 실행합니다. 모듈은 코드 소유권과 의존 방향의 경계입니다. PostgreSQL은 업무 상태를, Redis는 구매 대기 순서와 처리 슬롯을 관리합니다.
+`app`이 모든 업무 모듈을 조립하고 Spring Boot 애플리케이션을 실행합니다. API와 Worker는 기본 통합 실행 또는 역할별 분리 실행을 지원합니다. 모듈은 코드 소유권과 의존 방향의 경계입니다. PostgreSQL은 업무 상태를, Redis는 구매 대기 순서와 처리 슬롯을 관리합니다.
 
 전체 시스템과 실행 구성은 [C4 아키텍처](docs/architecture/README.md), 코드 경계는 [모듈 설계](docs/architecture/module-boundaries.md), 현재 로컬 배치는 [Deployment](docs/architecture/deployment.md)를 참고합니다.
 
@@ -32,8 +33,8 @@
 |---|---|
 | Language | Java 17 |
 | Framework | Spring Boot 3.5, Spring Modulith 1.4 |
-| Persistence | Spring Data JPA, PostgreSQL 17, Flyway |
-| Queue | Redis 7, ZSET, Lua Script, Spring TaskExecutor |
+| Persistence | Spring Data JPA, JdbcTemplate, PostgreSQL 17, Flyway |
+| Queue | Redis 7, ZSET, Lua Script, Kafka 4.2, Spring Kafka |
 | Security | Spring Security, 로컬 테스트용 Header 인증 |
 | Test | JUnit 5, Spring Boot Test, Testcontainers, Spring Modulith Test |
 | Load Test | k6 |
@@ -41,11 +42,11 @@
 
 ## 시작하기
 
-프로젝트 루트에서 PostgreSQL과 Redis를 실행한 뒤 애플리케이션을 시작합니다.
+프로젝트 루트에서 PostgreSQL·Redis·Kafka를 실행한 뒤 애플리케이션을 시작합니다.
 
 ```bash
 test -f .env || cp .env.example .env
-docker compose up -d
+docker compose --profile kafka up -d
 SPRING_PROFILES_ACTIVE=local ./gradlew :app:bootRun
 ```
 

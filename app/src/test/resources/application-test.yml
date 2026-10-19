@@ -1,4 +1,12 @@
+spring:
+  kafka:
+    listener:
+      auto-startup: false
+
 limited-ticketing:
+  kafka:
+    provision-topics: false
+    publisher-initial-delay: 3600000
   purchase:
     expiration:
       initial-delay: 3600000

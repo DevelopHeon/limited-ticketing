@@ -10,7 +10,6 @@ import com.example.limitedticketing.inventory.domain.repository.InventoryReposit
 import com.example.limitedticketing.member.domain.model.Member;
 import com.example.limitedticketing.member.domain.repository.MemberRepository;
 import com.example.limitedticketing.purchase.application.service.PurchaseExpirationService;
-import com.example.limitedticketing.purchase.domain.event.PurchaseReserved;
 import com.example.limitedticketing.purchase.domain.model.Purchase;
 import com.example.limitedticketing.purchase.domain.model.PurchaseStatus;
 import com.example.limitedticketing.purchase.domain.repository.PurchaseRepository;
@@ -25,18 +24,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import org.junit.jupiter.api.BeforeEach;
+import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
-import org.springframework.context.event.EventListener;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -51,7 +46,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles({"test", "baseline"})
-@Import({PurchaseReservationIntegrationTest.EventTestConfiguration.class, FixedClockConfiguration.class})
+@Import(FixedClockConfiguration.class)
 @DisplayName("구매 예약과 취소 및 만료 통합 검증")
 class PurchaseReservationIntegrationTest {
 
@@ -76,8 +71,6 @@ class PurchaseReservationIntegrationTest {
     @Autowired
     private InventoryRepository inventoryRepository;
 
-    @Autowired
-    private PurchaseReservedEventRecorder purchaseReservedEventRecorder;
 
     @Autowired
     private PurchaseRepository purchaseRepository;
@@ -98,13 +91,8 @@ class PurchaseReservationIntegrationTest {
         dynamicPropertyRegistry.add("spring.datasource.password", postgresql::getPassword);
     }
 
-    @BeforeEach
-    void clearRecordedEvents() {
-        purchaseReservedEventRecorder.clear();
-    }
-
     @Test
-    @DisplayName("인증된 회원의 구매 예약은 재고 한 개와 커밋 후 예약 이벤트를 생성한다")
+    @DisplayName("인증된 회원의 구매 예약은 구매 원장과 재고 한 개의 예약을 생성한다")
     void reservesInventoryAndCreatesPurchaseForAuthenticatedMember() throws Exception {
         Fixture fixture = createFixture(1);
         String purchaseRequestKey = issuePurchaseKey(fixture.memberId());
@@ -120,11 +108,10 @@ class PurchaseReservationIntegrationTest {
         Inventory inventory = inventoryRepository.findById(fixture.inventoryId()).orElseThrow();
         assertThat(inventory.getAvailableQuantity()).isZero();
         assertThat(inventory.getReservedQuantity()).isEqualTo(1);
-        assertThat(purchaseReservedEventRecorder.events())
-            .singleElement()
-            .satisfies(event -> {
-                assertThat(event.memberId()).isEqualTo(fixture.memberId());
-                assertThat(event.saleProductId()).isEqualTo(fixture.saleProductId());
+        assertThat(purchaseRepository.findByMemberIdAndPurchaseRequestKey(fixture.memberId(), purchaseRequestKey))
+            .isPresent().get().satisfies(purchase -> {
+                assertThat(purchase.getSaleProductId()).isEqualTo(fixture.saleProductId());
+                assertThat(purchase.getStatus()).isEqualTo(PurchaseStatus.PENDING_PAYMENT);
             });
     }
 
@@ -149,7 +136,7 @@ class PurchaseReservationIntegrationTest {
     }
 
     @Test
-    @DisplayName("이미 활성 구매가 있으면 추가 구매와 재고 예약을 거부하고 이벤트를 반복하지 않는다")
+    @DisplayName("이미 활성 구매가 있으면 추가 구매와 재고 예약을 거부한다")
     void rollsBackInventoryReservationWhenMemberAlreadyHasAnActivePurchase() throws Exception {
         Fixture fixture = createFixture(2);
 
@@ -166,12 +153,13 @@ class PurchaseReservationIntegrationTest {
         Inventory inventory = inventoryRepository.findById(fixture.inventoryId()).orElseThrow();
         assertThat(inventory.getAvailableQuantity()).isEqualTo(1);
         assertThat(inventory.getReservedQuantity()).isEqualTo(1);
-        assertThat(purchaseReservedEventRecorder.events()).hasSize(1);
+        assertThat(purchaseRepository.findByMemberIdAndPurchaseRequestKey(fixture.memberId(), "purchase-request-1")).isPresent();
+        assertThat(purchaseRepository.findByMemberIdAndPurchaseRequestKey(fixture.memberId(), "purchase-request-2")).isEmpty();
     }
 
     @Test
-    @DisplayName("품절 요청은 구매 행과 재고 예약 및 예약 이벤트를 남기지 않는다")
-    void soldOutRequestLeavesNoPurchaseOrReservationEvent() throws Exception {
+    @DisplayName("품절 요청은 구매 행과 재고 예약을 남기지 않는다")
+    void soldOutRequestLeavesNoPurchaseOrInventoryReservation() throws Exception {
         Fixture fixture = createFixture(0);
 
         mockMvc.perform(post("/api/sale-products/{saleProductId}/purchases", fixture.saleProductId())
@@ -182,7 +170,6 @@ class PurchaseReservationIntegrationTest {
 
         assertThat(purchaseRepository.findByMemberIdAndPurchaseRequestKey(fixture.memberId(), "sold-out-purchase"))
             .isEmpty();
-        assertThat(purchaseReservedEventRecorder.events()).isEmpty();
         assertThat(inventoryRepository.findById(fixture.inventoryId()).orElseThrow().getReservedQuantity()).isZero();
     }
 
@@ -235,7 +222,7 @@ class PurchaseReservationIntegrationTest {
     private long reserve(Fixture fixture) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/sale-products/{saleProductId}/purchases", fixture.saleProductId())
                 .header("X-Member-Id", fixture.memberId())
-                .header("Idempotency-Key", "purchase-" + java.util.UUID.randomUUID()))
+                .header("Idempotency-Key", "purchase-" + UUID.randomUUID()))
             .andExpect(status().isCreated())
             .andReturn();
         return objectMapper.readTree(result.getResponse().getContentAsString()).path("data").path("purchaseId").asLong();
@@ -282,7 +269,7 @@ class PurchaseReservationIntegrationTest {
     private String issuePurchaseKey(Long memberId) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/idempotency-keys")
                 .header("X-Member-Id", memberId)
-                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"operation\":\"PURCHASE\"}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.code").value("SUCCESS"))
@@ -296,30 +283,4 @@ class PurchaseReservationIntegrationTest {
     private record Fixture(Long memberId, Long saleProductId, Long inventoryId) {
     }
 
-    @TestConfiguration(proxyBeanMethods = false)
-    static class EventTestConfiguration {
-
-        @Bean
-        PurchaseReservedEventRecorder purchaseReservedEventRecorder() {
-            return new PurchaseReservedEventRecorder();
-        }
-    }
-
-    static class PurchaseReservedEventRecorder {
-
-        private final List<PurchaseReserved> events = new ArrayList<>();
-
-        @EventListener
-        public void record(PurchaseReserved event) {
-            events.add(event);
-        }
-
-        void clear() {
-            events.clear();
-        }
-
-        List<PurchaseReserved> events() {
-            return List.copyOf(events);
-        }
-    }
 }

@@ -19,16 +19,19 @@ import com.example.limitedticketing.purchase.application.port.in.PurchaseCommand
 import com.example.limitedticketing.purchase.application.port.in.dto.PurchaseReservation;
 import com.example.limitedticketing.purchase.application.port.in.dto.ReservePurchaseInput;
 import com.example.limitedticketing.purchase.domain.repository.PurchaseRepository;
+import com.example.limitedticketing.purchasewaiting.application.port.in.worker.PurchaseWaitingReservationPort;
 import com.example.limitedticketing.purchasewaiting.application.port.in.worker.PurchaseWaitingWorkerPort;
+import com.example.limitedticketing.purchasewaiting.application.port.in.worker.dto.ReservationJobInput;
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingQueuePort;
-import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingTaskExecutionPort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.dto.PurchaseWaitingClaim;
 import com.example.limitedticketing.purchasewaiting.application.service.DispatchPurchaseWaitingService;
 import com.example.limitedticketing.purchasewaiting.application.usecase.ClaimPurchaseWaitingUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.ProcessPurchaseWaitingUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.RecoverPurchaseWaitingUseCase;
+import com.example.limitedticketing.purchasewaiting.application.usecase.StartPurchaseWaitingExecutionUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ClaimPurchaseWaitingCommand;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ProcessPurchaseWaitingCommand;
+import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ReservationExecutionCommand;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingEntry;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingStatus;
 import com.example.limitedticketing.purchasewaiting.domain.repository.PurchaseWaitingEntryRepository;
@@ -53,15 +56,17 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -136,7 +141,9 @@ class PurchaseWaitingIntegrationTest {
     @Autowired
     private ProcessPurchaseWaitingUseCase processPurchaseWaitingUseCase;
     @Autowired
-    private PurchaseWaitingTaskExecutionPort purchaseWaitingTaskExecutionPort;
+    private PurchaseWaitingReservationPort purchaseWaitingReservationPort;
+    @Autowired
+    private StartPurchaseWaitingExecutionUseCase startPurchaseWaitingExecutionUseCase;
 
     @Autowired
     private PlatformTransactionManager transactions;
@@ -151,6 +158,15 @@ class PurchaseWaitingIntegrationTest {
         dynamicPropertyRegistry.add("limited-ticketing.queue.worker.initial-delay", () -> "600000");
         dynamicPropertyRegistry.add("limited-ticketing.queue.worker.recovery-initial-delay", () -> "600000");
         dynamicPropertyRegistry.add("limited-ticketing.queue.worker.recovery-batch-size", () -> "2");
+    }
+
+    @BeforeEach
+    void clearQueueFixtures() {
+        jdbcTemplate.update("DELETE FROM reservation_job_outbox");
+        jdbcTemplate.update("DELETE FROM reservation_queue_entries");
+        try (RedisConnection connection = stringRedisTemplate.getConnectionFactory().getConnection()) {
+            connection.serverCommands().flushDb();
+        }
     }
 
     @Test
@@ -193,7 +209,7 @@ class PurchaseWaitingIntegrationTest {
         ExecutorService executorService = Executors.newFixedThreadPool(8);
         CountDownLatch ready = new CountDownLatch(8);
         CountDownLatch start = new CountDownLatch(1);
-        List<Future<Optional<com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingEntry>>> results = new ArrayList<>();
+        List<Future<Optional<PurchaseWaitingEntry>>> results = new ArrayList<>();
         try {
             for (int index = 0; index < 8; index++) {
                 results.add(executorService.submit(() -> {
@@ -207,7 +223,7 @@ class PurchaseWaitingIntegrationTest {
             assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
             start.countDown();
             int winners = 0;
-            for (Future<Optional<com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingEntry>> result : results) {
+            for (Future<Optional<PurchaseWaitingEntry>> result : results) {
                 if (result.get(5, TimeUnit.SECONDS).isPresent()) {
                     winners++;
                 }
@@ -337,6 +353,7 @@ class PurchaseWaitingIntegrationTest {
             new ReservePurchaseInput(fixture.firstMemberId(), fixture.saleProductId(), requestKey)
         );
 
+        startDispatchedEntries();
         jdbcTemplate.update("update reservation_queue_entries set lease_until = ? where id = ?",
             LocalDateTime.of(2000, 1, 1, 0, 0), entry.id());
         recoverPurchaseWaitingUseCase.recover();
@@ -370,6 +387,7 @@ class PurchaseWaitingIntegrationTest {
         stringRedisTemplate.opsForZSet().remove(waitingKey, entry.id().toString());
         stringRedisTemplate.opsForZSet().add(processingKey, entry.id().toString(), 0);
 
+        startDispatchedEntries();
         jdbcTemplate.update("update reservation_queue_entries set lease_until = ? where id = ?",
             LocalDateTime.of(2000, 1, 1, 0, 0), entry.id());
         recoverPurchaseWaitingUseCase.recover();
@@ -478,6 +496,7 @@ class PurchaseWaitingIntegrationTest {
         QueueEntry entry = enqueue(fixture.saleProductId(), fixture.firstMemberId(), issuePurchaseKey(fixture.firstMemberId()));
         PurchaseWaitingClaim first = purchaseWaitingQueuePort.claimNext(fixture.saleProductId(), 10, 1, Instant.now()).get(0);
         claimPurchaseWaitingUseCase.claim(new ClaimPurchaseWaitingCommand(entry.id(), first.token())).orElseThrow();
+        startDispatchedEntries();
         jdbcTemplate.update("update reservation_queue_entries set lease_until = ? where id = ?",
             LocalDateTime.of(2000, 1, 1, 0, 0), entry.id());
         recoverPurchaseWaitingUseCase.recover();
@@ -494,6 +513,7 @@ class PurchaseWaitingIntegrationTest {
         assertThat(stringRedisTemplate.opsForZSet().zCard("waiting:sale:" + fixture.saleProductId())).isZero();
         assertThat(jdbcTemplate.queryForObject("select count(*) from purchases where sale_product_id = ?",
             Long.class, fixture.saleProductId())).isZero();
+        startDispatchedEntries();
         PurchaseWaitingEntry completed = processPurchaseWaitingUseCase.process(new ProcessPurchaseWaitingCommand(entry.id(), second.token())).orElseThrow();
         purchaseWaitingQueuePort.releaseProcessing(completed);
         assertThat(completed.getStatus()).isEqualTo(PurchaseWaitingStatus.RESERVED);
@@ -507,6 +527,7 @@ class PurchaseWaitingIntegrationTest {
         QueueEntry entry = enqueue(fixture.saleProductId(), fixture.firstMemberId(), issuePurchaseKey(fixture.firstMemberId()));
         PurchaseWaitingClaim claim = purchaseWaitingQueuePort.claimNext(fixture.saleProductId(), 10, 1, Instant.now()).get(0);
         claimPurchaseWaitingUseCase.claim(new ClaimPurchaseWaitingCommand(entry.id(), claim.token())).orElseThrow();
+        startDispatchedEntries();
         jdbcTemplate.update("update reservation_queue_entries set lease_until = ? where id = ?",
             LocalDateTime.of(2000, 1, 1, 0, 0), entry.id());
         CountDownLatch locked = new CountDownLatch(1);
@@ -534,33 +555,25 @@ class PurchaseWaitingIntegrationTest {
     }
 
     @Test
-    @DisplayName("전역 Worker 슬롯이 가득 차면 상품이 여러 개여도 DB와 Redis 대기를 claim하지 않는다")
-    void fullExecutorLeavesEverySaleWaiting() throws Exception {
+    @DisplayName("전역 입장 슬롯이 Kafka 전달 대기로 가득 차면 다른 상품의 DB와 Redis 대기를 claim하지 않는다")
+    void fullAdmissionLeavesEveryOtherSaleWaiting() throws Exception {
+        Fixture occupied = createFixture(10);
+        for (int index = 0; index < 10; index++) {
+            Member member = memberRepository.save(Member.register("occupied-" + System.nanoTime(), "전달 대기 회원"));
+            QueueEntry admitted = enqueue(occupied.saleProductId(), member.getId(), issuePurchaseKey(member.getId()));
+            claimPurchaseWaitingUseCase.claim(new ClaimPurchaseWaitingCommand(admitted.id(), UUID.randomUUID())).orElseThrow();
+        }
         Fixture first = createFixture(1);
         Fixture second = createFixture(1);
         QueueEntry firstEntry = enqueue(first.saleProductId(), first.firstMemberId(), issuePurchaseKey(first.firstMemberId()));
         QueueEntry secondEntry = enqueue(second.saleProductId(), second.firstMemberId(), issuePurchaseKey(second.firstMemberId()));
-        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(purchaseWaitingTaskExecutionPort.availableSlots()).isEqualTo(10));
-        CountDownLatch running = new CountDownLatch(10);
-        CountDownLatch release = new CountDownLatch(1);
-        try {
-            for (int index = 0; index < 10; index++) {
-                purchaseWaitingTaskExecutionPort.execute(() -> {
-                    running.countDown();
-                    awaitLatch(release);
-                });
-            }
-            assertThat(running.await(5, TimeUnit.SECONDS)).isTrue();
-            purchaseWaitingWorkerPort.dispatchWaitingEntries();
-            for (QueueEntry entry : List.of(firstEntry, secondEntry)) {
-                PurchaseWaitingEntry persisted = purchaseWaitingEntryRepository.findById(entry.id()).orElseThrow();
-                assertThat(persisted.getStatus()).isEqualTo(PurchaseWaitingStatus.WAITING);
-                assertThat(purchaseWaitingQueuePort.findPosition(persisted.getSaleProductId(), entry.id())).isPresent();
-                assertThat(purchaseWaitingEntryRepository.countProcessing(persisted.getSaleProductId())).isZero();
-            }
-        } finally {
-            release.countDown();
-            await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(purchaseWaitingTaskExecutionPort.availableSlots()).isEqualTo(10));
+        purchaseWaitingWorkerPort.dispatchWaitingEntries();
+        assertThat(purchaseWaitingEntryRepository.countInFlight()).isEqualTo(10);
+        for (QueueEntry entry : List.of(firstEntry, secondEntry)) {
+            PurchaseWaitingEntry persisted = purchaseWaitingEntryRepository.findById(entry.id()).orElseThrow();
+            assertThat(persisted.getStatus()).isEqualTo(PurchaseWaitingStatus.WAITING);
+            assertThat(purchaseWaitingQueuePort.findPosition(persisted.getSaleProductId(), entry.id())).isPresent();
+            assertThat(purchaseWaitingEntryRepository.countInFlight(persisted.getSaleProductId())).isZero();
         }
     }
 
@@ -582,38 +595,34 @@ class PurchaseWaitingIntegrationTest {
             return locked;
         }).when(purchaseWaitingEntryRepository).findByIdForUpdate(any(UUID.class));
         purchaseWaitingWorkerPort.dispatchWaitingEntries();
-        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+        ExecutorService executorService = Executors.newFixedThreadPool(10);
+        try {
+            List<Future<?>> results = new ArrayList<>();
+            for (QueueEntry entry : entries) {
+                results.add(executorService.submit(() -> purchaseWaitingReservationPort.execute(jobInput(entry.id()))));
+            }
+            for (Future<?> result : results) {
+                result.get(10, TimeUnit.SECONDS);
+            }
             for (QueueEntry entry : entries) {
                 assertThat(purchaseWaitingEntryRepository.findById(entry.id()).orElseThrow().getStatus()).isEqualTo(PurchaseWaitingStatus.RESERVED);
             }
-        });
+        } finally {
+            executorService.shutdownNow();
+        }
         assertThat(inventoryRepository.findById(fixture.inventoryId()).orElseThrow().getReservedQuantity()).isEqualTo(10);
     }
 
     @Test
-    @DisplayName("Executor 실행 거부 시 DB 처리 권한을 반환하고 Redis에 원래 순번으로 재대기한다")
-    void rejectedDispatchRestoresTheOriginalWaitingEntry() throws Exception {
+    @DisplayName("Redis claim 뒤 DB 입장이 거부되면 원래 식별자와 순번으로 다시 대기시킨다")
+    void rejectedAdmissionRestoresTheOriginalWaitingEntry() throws Exception {
         Fixture fixture = createFixture(1);
         QueueEntry entry = enqueue(fixture.saleProductId(), fixture.firstMemberId(), issuePurchaseKey(fixture.firstMemberId()));
         PurchaseWaitingEntry original = purchaseWaitingEntryRepository.findById(entry.id()).orElseThrow();
-        PurchaseWaitingTaskExecutionPort purchaseWaitingTaskExecutionPort = new PurchaseWaitingTaskExecutionPort() {
-            @Override
-            public int availableSlots() {
-                return 1;
-            }
-            @Override
-            public void execute(Runnable task) {
-                throw new RejectedExecutionException("Deliberate capacity race");
-            }
-        };
-        DispatchPurchaseWaitingService dispatchPurchaseWaitingService = new DispatchPurchaseWaitingService(purchaseWaitingEntryRepository, purchaseWaitingQueuePort,
-            claimPurchaseWaitingUseCase, processPurchaseWaitingUseCase, purchaseWaitingTaskExecutionPort,
-            Clock.systemDefaultZone(), 10, 1);
-        // Earlier test fixtures may also be waiting; rotate through each sale once.
-        int saleCount = purchaseWaitingEntryRepository.findSaleProductIdsWithWaitingEntries().size();
-        for (int index = 0; index < saleCount; index++) {
-            dispatchPurchaseWaitingService.dispatchWaitingEntries();
-        }
+        ClaimPurchaseWaitingUseCase rejectedAdmission = command -> Optional.empty();
+        DispatchPurchaseWaitingService service = new DispatchPurchaseWaitingService(purchaseWaitingEntryRepository,
+            purchaseWaitingQueuePort, rejectedAdmission, Clock.systemDefaultZone(), 10, 10, 1);
+        service.dispatchWaitingEntries();
         PurchaseWaitingEntry restored = purchaseWaitingEntryRepository.findById(entry.id()).orElseThrow();
         assertThat(restored.getStatus()).isEqualTo(PurchaseWaitingStatus.WAITING);
         assertThat(restored.getProcessingToken()).isNull();
@@ -654,10 +663,11 @@ class PurchaseWaitingIntegrationTest {
             "processing-tokens:sale:" + fixture.saleProductId()));
         PurchaseWaitingClaim extra = purchaseWaitingQueuePort.claimNext(fixture.saleProductId(), 10, 1, Instant.now()).get(0);
         assertThat(claimPurchaseWaitingUseCase.claim(new ClaimPurchaseWaitingCommand(extra.waitingEntryId(), extra.token()))).isEmpty();
-        assertThat(purchaseWaitingEntryRepository.countProcessing(fixture.saleProductId())).isEqualTo(10);
+        assertThat(purchaseWaitingEntryRepository.countInFlight(fixture.saleProductId())).isEqualTo(10);
         PurchaseWaitingEntry waiting = purchaseWaitingEntryRepository.findById(extra.waitingEntryId()).orElseThrow();
         assertThat(waiting.getStatus()).isEqualTo(PurchaseWaitingStatus.WAITING);
         purchaseWaitingQueuePort.requeue(waiting, extra.token());
+        startDispatchedEntries();
         jdbcTemplate.update("update reservation_queue_entries set lease_until = ? where sale_product_id = ? and status = 'PROCESSING'",
             LocalDateTime.of(2000, 1, 1, 0, 0), fixture.saleProductId());
         recoverPurchaseWaitingUseCase.recover();
@@ -666,6 +676,28 @@ class PurchaseWaitingIntegrationTest {
             awaitCompletion(entry.id(), memberId);
         }
         assertThat(inventoryRepository.findById(fixture.inventoryId()).orElseThrow().getReservedQuantity()).isEqualTo(10);
+    }
+
+    private ReservationJobInput jobInput(UUID entryId) {
+        return jdbcTemplate.queryForObject("""
+            SELECT event_id, waiting_entry_id, sale_product_id, processing_token FROM reservation_job_outbox
+            WHERE waiting_entry_id = ? AND event_type = 'PurchaseReservationRequested'
+            ORDER BY created_at DESC LIMIT 1
+            """, (rs, row) -> new ReservationJobInput(rs.getObject("event_id", UUID.class),
+            rs.getObject("waiting_entry_id", UUID.class), rs.getLong("sale_product_id"), rs.getObject("processing_token", UUID.class)), entryId);
+    }
+
+    private void startDispatchedEntries() {
+        for (UUID entryId : jdbcTemplate.queryForList("SELECT id FROM reservation_queue_entries WHERE status = 'DISPATCHED'", UUID.class)) {
+            ReservationJobInput input = jobInput(entryId);
+            startPurchaseWaitingExecutionUseCase.start(new ReservationExecutionCommand(input.eventId(), input.waitingEntryId(), input.saleProductId(), input.processingToken()));
+        }
+    }
+
+    private void consumeDispatchedEntries() {
+        for (UUID entryId : jdbcTemplate.queryForList("SELECT id FROM reservation_queue_entries WHERE status = 'DISPATCHED'", UUID.class)) {
+            purchaseWaitingReservationPort.execute(jobInput(entryId));
+        }
     }
 
     private static void awaitLatch(CountDownLatch latch) {
@@ -699,6 +731,7 @@ class PurchaseWaitingIntegrationTest {
     private QueueEntry awaitCompletion(UUID queueEntryId, Long memberId) throws Exception {
         for (int attempts = 0; attempts < 50; attempts++) {
             purchaseWaitingWorkerPort.dispatchWaitingEntries();
+            consumeDispatchedEntries();
             QueueEntry entry = find(queueEntryId, memberId);
             if (entry.status() != PurchaseWaitingStatus.WAITING && entry.status() != PurchaseWaitingStatus.PROCESSING) {
                 return entry;
@@ -726,7 +759,7 @@ class PurchaseWaitingIntegrationTest {
     private String issuePurchaseKey(Long memberId) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/idempotency-keys")
                 .header("X-Member-Id", memberId)
-                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"operation\":\"PURCHASE\"}"))
             .andExpect(status().isOk())
             .andReturn();

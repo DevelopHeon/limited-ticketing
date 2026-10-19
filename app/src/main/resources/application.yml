@@ -3,6 +3,8 @@ server:
 spring:
   application:
     name: limited-ticketing
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:19092,localhost:29092,localhost:39092}
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/limited_ticketing}
     username: ${DB_USERNAME:limited_ticketing}
@@ -23,6 +25,14 @@ spring:
         enabled: false
 
 limited-ticketing:
+  kafka:
+    reservation-topic: limited-ticketing.purchasewaiting.reservation.v1
+    dead-letter-topic: limited-ticketing.purchasewaiting.reservation.v1-dlt
+    group-id: purchasewaiting-reservation-v1
+    replication-factor: 3
+    min-in-sync-replicas: 2
+    publisher-fixed-delay: 100
+    publisher-initial-delay: 1000
   queue:
     admission:
       max-outstanding: ${QUEUE_MAX_OUTSTANDING:10000}

@@ -20,6 +20,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 ```bash
 test -f .env || cp .env.example .env
+docker compose --profile kafka up -d postgres redis kafka-1 kafka-2 kafka-3
 ./gradlew :app:bootJar
 SPRING_PROFILES_ACTIVE=local,baseline \
 java -Xms256m -Xmx768m -jar app/build/libs/app-0.0.1-SNAPSHOT.jar
@@ -40,6 +41,8 @@ python3 load-test/k6/run-baseline.py --flow waiting --scenario smoke --base-url 
 요구 도구는 Python 3(Mac/Linux), k6, psql, Docker CLI와 Node.js(계약 테스트용)다. Prometheus는 `http://localhost:9090`, Grafana는 `http://localhost:3000`이며 Grafana 사용자는 admin, 최초 암호는 개발 안내의 로컬 비밀 파일에서 확인한다. 지표는 local/test 관리자 header로만 scrape한다. 관측 판정은 base URL의 로컬 포트를 `host.docker.internal:<port>`와 대조하고, 해당 flow URI의 HTTP counter 증가를 확인한다. warmup 뒤 5초 scrape 대기와 측정 전 5초 표본을 포함한다.
 
 기존 DB의 활성 대기·결제 대기 구매가 있으면 측정을 거부한다. 해당 요청의 소유권과 상태를 확인해 정상 처리한 뒤 실행하며, 측정을 위해 기존 데이터를 일괄 삭제하지 않는다. 기존 환경에서 얻은 새 결과는 별도 환경에서 수집한 과거 1단계 결과와 조건을 구분한다.
+
+대기 flow는 Kafka를 사용한다. 활성 요청 판정에는 WAITING·DISPATCHED·PROCESSING을 모두 포함하며, fixture 정리는 해당 구매 취소·판매 종료까지만 수행하고 대기 행·Outbox는 보존한다. API/Worker 분리 시 자동 도구는 API 대상 지표를 수집하므로 Worker metrics·기동 설정은 별도로 기록한다. 실행 중인 JAR를 재빌드하지 않는 절차는 [개발 안내](../development/README.md#api와-worker-역할-분리)를 따른다.
 
 직접 flow는 `baseline` profile이 필요하다. 대기 flow만 실행하면 기본 `local`을 사용한다. 평가 도구의 profile·Worker·풀 환경 변수는 실제 앱 기동 설정과 일치시킨다.
 

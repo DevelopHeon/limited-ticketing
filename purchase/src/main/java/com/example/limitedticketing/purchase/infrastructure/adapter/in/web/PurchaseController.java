@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-@Profile("baseline")
+@Profile("baseline & !worker")
 @RestController
 @RequestMapping("/api/sale-products")
 public class PurchaseController {

@@ -49,6 +49,12 @@ public class PurchaseWaitingJpaEntity {
     @Column(name = "completed_at")
     private LocalDateTime completedAt;
 
+    @Column(name = "dispatched_at")
+    private LocalDateTime dispatchedAt;
+
+    @Column(name = "execution_attempts", nullable = false)
+    private int executionAttempts;
+
     @Column(name = "processing_token")
     private UUID processingToken;
 
@@ -72,6 +78,8 @@ public class PurchaseWaitingJpaEntity {
         this.completedAt = entry.getCompletedAt();
         this.processingToken = entry.getProcessingToken();
         this.leaseUntil = entry.getLeaseUntil();
+        this.dispatchedAt = entry.getDispatchedAt();
+        this.executionAttempts = entry.getExecutionAttempts();
     }
 
     public static PurchaseWaitingJpaEntity from(PurchaseWaitingEntry entry) {
@@ -92,7 +100,9 @@ public class PurchaseWaitingJpaEntity {
             processingStartedAt,
             completedAt,
             processingToken,
-            leaseUntil
+            leaseUntil,
+            dispatchedAt,
+            executionAttempts
         );
     }
 }

@@ -2,7 +2,6 @@ package com.example.limitedticketing.purchasewaiting.domain.model;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
 import com.example.limitedticketing.purchasewaiting.domain.exception.PurchaseWaitingException;
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -34,7 +33,7 @@ class PurchaseWaitingEntryTest {
         assertThat(entry.getStatus()).isEqualTo(PurchaseWaitingStatus.WAITING);
         assertThat(entry.getPurchaseId()).isNull();
 
-        entry.beginProcessing(UUID.randomUUID(), REQUESTED_AT.plusSeconds(1), REQUESTED_AT.plusSeconds(1).plusSeconds(30));
+        beginProcessing(entry, UUID.randomUUID(), REQUESTED_AT.plusSeconds(1), REQUESTED_AT.plusSeconds(1).plusSeconds(30));
         entry.completeReservation(10L, REQUESTED_AT.plusSeconds(2));
 
         assertThat(entry.getStatus()).isEqualTo(PurchaseWaitingStatus.RESERVED);
@@ -47,7 +46,7 @@ class PurchaseWaitingEntryTest {
     void claimedRequestCannotBeClaimedAgain() {
         PurchaseWaitingEntry entry = waitingEntry();
         LocalDateTime claimedAt = REQUESTED_AT.plusSeconds(1);
-        entry.beginProcessing(UUID.randomUUID(), claimedAt, claimedAt.plusSeconds(30));
+        beginProcessing(entry, UUID.randomUUID(), claimedAt, claimedAt.plusSeconds(30));
 
         assertThatThrownBy(() -> entry.beginProcessing(UUID.randomUUID(), claimedAt.plusSeconds(1), claimedAt.plusSeconds(1).plusSeconds(30)))
             .isInstanceOf(PurchaseWaitingException.class);
@@ -59,7 +58,7 @@ class PurchaseWaitingEntryTest {
     void recoveredRequestKeepsItsIdentityAndOriginalSequence() {
         PurchaseWaitingEntry entry = waitingEntry();
         UUID originalId = entry.getId();
-        entry.beginProcessing(UUID.randomUUID(), REQUESTED_AT.plusSeconds(1), REQUESTED_AT.plusSeconds(1).plusSeconds(30));
+        beginProcessing(entry, UUID.randomUUID(), REQUESTED_AT.plusSeconds(1), REQUESTED_AT.plusSeconds(1).plusSeconds(30));
 
         entry.returnToWaiting();
 
@@ -69,7 +68,7 @@ class PurchaseWaitingEntryTest {
         assertThat(entry.getPurchaseRequestKey()).isEqualTo("purchase-1");
         assertThat(entry.getProcessingStartedAt()).isNull();
 
-        entry.beginProcessing(UUID.randomUUID(), REQUESTED_AT.plusMinutes(1), REQUESTED_AT.plusMinutes(1).plusSeconds(30));
+        beginProcessing(entry, UUID.randomUUID(), REQUESTED_AT.plusMinutes(1), REQUESTED_AT.plusMinutes(1).plusSeconds(30));
         entry.completeReservation(10L, REQUESTED_AT.plusMinutes(1));
         assertThat(entry.getStatus()).isEqualTo(PurchaseWaitingStatus.RESERVED);
     }
@@ -79,7 +78,7 @@ class PurchaseWaitingEntryTest {
     @DisplayName("완료된 대기 요청은 재처리하거나 결과를 덮어쓸 수 없다")
     void completedRequestCannotBeReprocessedOrHaveItsResultOverwritten(PurchaseWaitingStatus status) {
         PurchaseWaitingEntry entry = waitingEntry();
-        entry.beginProcessing(UUID.randomUUID(), REQUESTED_AT.plusSeconds(1), REQUESTED_AT.plusSeconds(1).plusSeconds(30));
+        beginProcessing(entry, UUID.randomUUID(), REQUESTED_AT.plusSeconds(1), REQUESTED_AT.plusSeconds(1).plusSeconds(30));
         switch (status) {
             case RESERVED -> entry.completeReservation(10L, REQUESTED_AT.plusSeconds(2));
             case SOLD_OUT -> entry.markSoldOut("INSUFFICIENT_INVENTORY", REQUESTED_AT.plusSeconds(2));
@@ -109,12 +108,17 @@ class PurchaseWaitingEntryTest {
         PurchaseWaitingEntry entry = waitingEntry();
         UUID oldToken = UUID.randomUUID();
         UUID newToken = UUID.randomUUID();
-        entry.beginProcessing(oldToken, REQUESTED_AT, REQUESTED_AT.plusSeconds(30));
+        beginProcessing(entry, oldToken, REQUESTED_AT, REQUESTED_AT.plusSeconds(30));
         entry.returnToWaiting();
-        entry.beginProcessing(newToken, REQUESTED_AT.plusSeconds(40), REQUESTED_AT.plusSeconds(70));
+        beginProcessing(entry, newToken, REQUESTED_AT.plusSeconds(40), REQUESTED_AT.plusSeconds(70));
         assertThat(entry.ownsAttempt(oldToken)).isFalse();
         assertThat(entry.ownsAttempt(newToken)).isTrue();
         assertThat(entry.getQueueSequence()).isEqualTo(42);
+    }
+
+    private void beginProcessing(PurchaseWaitingEntry entry, UUID token, LocalDateTime now, LocalDateTime leaseUntil) {
+        entry.dispatch(token, now);
+        entry.beginProcessing(token, now, leaseUntil);
     }
 
     private PurchaseWaitingEntry waitingEntry() {

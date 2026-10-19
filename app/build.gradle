@@ -15,6 +15,7 @@ dependencies {
     implementation rootProject.libraries.bootDataRedis
     implementation rootProject.libraries.bootSecurity
     implementation rootProject.libraries.bootValidation
+    implementation rootProject.libraries.springKafka
     implementation rootProject.libraries.bootWeb
     implementation rootProject.libraries.flywayCore
     implementation rootProject.libraries.modulithCore
@@ -24,6 +25,7 @@ dependencies {
     testImplementation rootProject.libraries.bootTest
     testImplementation rootProject.libraries.modulithDocs
     testImplementation rootProject.libraries.modulithTest
+    testImplementation rootProject.libraries.testcontainersKafka
     testImplementation rootProject.libraries.testcontainersJunit
     testImplementation rootProject.libraries.testcontainersPostgresql
     testRuntimeOnly rootProject.libraries.junitPlatform

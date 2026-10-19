@@ -26,7 +26,7 @@ def drain(environment, fixture, deadline_seconds=120):
     deadline = time.monotonic() + deadline_seconds
     while True:
         snapshot = environment.verify(fixture)
-        active = sum(snapshot['queue'].get(key, 0) for key in ('WAITING', 'PROCESSING'))
+        active = sum(snapshot['queue'].get(key, 0) for key in ('WAITING', 'DISPATCHED', 'PROCESSING'))
         if not active or time.monotonic() >= deadline:
             return snapshot
         time.sleep(2)

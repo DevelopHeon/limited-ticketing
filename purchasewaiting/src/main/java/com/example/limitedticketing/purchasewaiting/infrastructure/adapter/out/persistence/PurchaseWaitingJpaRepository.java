@@ -1,5 +1,6 @@
 package com.example.limitedticketing.purchasewaiting.infrastructure.adapter.out.persistence;
 
+import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingStatus;
 import com.example.limitedticketing.purchasewaiting.infrastructure.adapter.out.persistence.entity.PurchaseWaitingJpaEntity;
 import java.time.LocalDateTime;
 import java.util.Collection;
@@ -12,6 +13,9 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface PurchaseWaitingJpaRepository extends JpaRepository<PurchaseWaitingJpaEntity, UUID> {
+
+    @Query("select entry.saleProductId from PurchaseWaitingJpaEntity entry where entry.id = :id")
+    Optional<Long> findSaleProductId(@Param("id") UUID id);
 
     Optional<PurchaseWaitingJpaEntity> findByMemberIdAndPurchaseRequestKey(Long memberId, String purchaseRequestKey);
 
@@ -52,16 +56,20 @@ public interface PurchaseWaitingJpaRepository extends JpaRepository<PurchaseWait
     String lockQueue(@Param("saleId") Long saleId);
 
     long countBySaleProductIdAndStatusIn(Long saleProductId,
-        Collection<com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingStatus> statuses);
+        Collection<PurchaseWaitingStatus> statuses);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
-        UPDATE reservation_queue_entries SET status = 'PROCESSING', processing_token = :token,
-            processing_started_at = :now, lease_until = :leaseUntil
+        UPDATE reservation_queue_entries SET status = 'DISPATCHED', processing_token = :token,
+            dispatched_at = :now, lease_until = NULL
         WHERE id = :id AND status = 'WAITING'
         """, nativeQuery = true)
-    int claim(@Param("id") UUID id, @Param("token") UUID token,
-        @Param("now") LocalDateTime now, @Param("leaseUntil") LocalDateTime leaseUntil);
+    int dispatch(@Param("id") UUID id, @Param("token") UUID token, @Param("now") LocalDateTime now);
+
+    @Query(value = "SELECT CAST(pg_advisory_xact_lock(842319021) AS text)", nativeQuery = true)
+    String lockAdmission();
+
+    long countByStatusIn(Collection<PurchaseWaitingStatus> statuses);
 
     @Query(value = """
         INSERT INTO reservation_queue_sequences (sale_product_id, last_sequence) VALUES (:saleId, 1)
@@ -74,14 +82,27 @@ public interface PurchaseWaitingJpaRepository extends JpaRepository<PurchaseWait
     @Query("""
         select entry.id from PurchaseWaitingJpaEntity entry where entry.id in :queueEntryIds
         and entry.status in (com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingStatus.WAITING,
+            com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingStatus.DISPATCHED,
             com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingStatus.PROCESSING)
         """)
     List<UUID> findActiveIds(@Param("queueEntryIds") Collection<UUID> queueEntryIds);
 
     boolean existsBySaleProductIdAndStatusIn(
         Long saleProductId,
-        Collection<com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingStatus> statuses
+        Collection<PurchaseWaitingStatus> statuses
     );
+
+    boolean existsByMemberIdAndSaleProductIdAndIdNotAndStatusIn(Long memberId, Long saleProductId, UUID excludedEntryId,
+        Collection<PurchaseWaitingStatus> statuses);
+
+    @Query(value = "SELECT coalesce(sum(execution_attempts), 0) FROM reservation_queue_entries", nativeQuery = true)
+    long sumExecutionAttempts();
+
+    @Query(value = """
+        SELECT coalesce(greatest(extract(epoch FROM (CAST(:now AS timestamp) - min(dispatched_at))), 0), 0)
+        FROM reservation_queue_entries WHERE status = 'DISPATCHED'
+        """, nativeQuery = true)
+    double oldestDispatchedSeconds(@Param("now") LocalDateTime now);
 
     @Modifying
     @Query(value = """

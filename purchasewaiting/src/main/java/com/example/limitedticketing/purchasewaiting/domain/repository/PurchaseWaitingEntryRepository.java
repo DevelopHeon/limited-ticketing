@@ -12,13 +12,19 @@ public interface PurchaseWaitingEntryRepository {
 
     long countActive(Long saleProductId);
 
-    long countProcessing(Long saleProductId);
+    long countInFlight(Long saleProductId);
+
+    long countInFlight();
+
+    void lockAdmission();
 
     Optional<PurchaseWaitingEntry> findByIdForUpdate(UUID queueEntryId);
 
     Optional<PurchaseWaitingEntry> findByIdForUpdateSkipLocked(UUID queueEntryId);
 
     Optional<PurchaseWaitingEntry> findById(UUID queueEntryId);
+
+    Optional<Long> findSaleProductId(UUID queueEntryId);
 
     Optional<PurchaseWaitingEntry> findByMemberIdAndPurchaseRequestKey(Long memberId, String purchaseRequestKey);
 
@@ -32,9 +38,11 @@ public interface PurchaseWaitingEntryRepository {
 
     boolean existsActiveEntry(Long saleProductId);
 
+    boolean existsOtherActiveEntry(Long memberId, Long saleProductId, UUID excludedEntryId);
+
     void lockQueue(Long saleProductId);
 
-    Optional<PurchaseWaitingEntry> claim(UUID queueEntryId, UUID token, LocalDateTime now, LocalDateTime leaseUntil);
+    Optional<PurchaseWaitingEntry> dispatch(UUID queueEntryId, UUID token, LocalDateTime now);
 
     PurchaseWaitingEntry save(PurchaseWaitingEntry entry);
 

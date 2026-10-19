@@ -6,6 +6,7 @@ import com.example.limitedticketing.purchasewaiting.application.port.in.dto.Purc
 import com.example.limitedticketing.purchasewaiting.application.usecase.FindPurchaseWaitingUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.query.FindPurchaseWaitingQuery;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.result.PurchaseWaitingResult;
+import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingStatus;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -20,7 +21,7 @@ public class PurchaseWaitingQueryPortService implements PurchaseWaitingQueryPort
     @Override
     public PurchaseWaitingOutput find(FindPurchaseWaitingInput input) {
         PurchaseWaitingResult result = findPurchaseWaitingUseCase.find(new FindPurchaseWaitingQuery(input.waitingEntryId(), input.memberId()));
-        return new PurchaseWaitingOutput(result.waitingEntryId(), result.queueSequence(), result.status().name(),
+        return new PurchaseWaitingOutput(result.waitingEntryId(), result.queueSequence(), result.status() == PurchaseWaitingStatus.DISPATCHED ? "PROCESSING" : result.status().name(),
             result.position(), result.purchaseId(), result.failureCode(), result.createdAt(),
             result.processingStartedAt(), result.completedAt());
     }

@@ -187,9 +187,11 @@ class BaselineResultTest(unittest.TestCase):
 
     def test_active_requests_are_incomplete(self):
         """drain 제한 뒤 미처리 요청을 완료된 결과로 보고하지 않는다."""
-        db = verification()
-        db["queue"] = {"RESERVED": 3, "SOLD_OUT": 6, "PROCESSING": 1}
-        self.assertEqual(evaluate(db=db)["integrity"], "INCOMPLETE")
+        for status in ("WAITING", "DISPATCHED", "PROCESSING"):
+            with self.subTest(status=status):
+                db = verification()
+                db["queue"] = {"RESERVED": 3, "SOLD_OUT": 6, status: 1}
+                self.assertEqual(evaluate(db=db)["integrity"], "INCOMPLETE")
 
     def test_incomplete_summary_is_not_a_success(self):
         """실행이 중단되어 summary가 비어 있으면 성공으로 기본 처리하지 않는다."""

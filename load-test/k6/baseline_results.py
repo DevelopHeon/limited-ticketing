@@ -84,7 +84,7 @@ def evaluate_results(flow, expected, inventory, summary, verification, observati
         else:
             valid = valid and not queue
         redis = verification.get('redis', {})
-        if queue.get('WAITING', 0) + queue.get('PROCESSING', 0) > 0:
+        if sum(queue.get(status, 0) for status in ('WAITING', 'DISPATCHED', 'PROCESSING')) > 0:
             result['integrity'] = 'INCOMPLETE'
             result['reasons'].append('Requests remain active after drain deadline')
         elif verification.get('redisError') or 'redis' not in verification:

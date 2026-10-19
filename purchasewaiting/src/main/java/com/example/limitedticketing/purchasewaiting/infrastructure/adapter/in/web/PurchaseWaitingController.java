@@ -9,6 +9,7 @@ import com.example.limitedticketing.purchasewaiting.infrastructure.adapter.in.we
 import com.example.limitedticketing.shared.api.ApiResponse;
 import java.net.URI;
 import java.util.UUID;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@Profile("!worker")
 @RequestMapping("/api")
 public class PurchaseWaitingController {
 

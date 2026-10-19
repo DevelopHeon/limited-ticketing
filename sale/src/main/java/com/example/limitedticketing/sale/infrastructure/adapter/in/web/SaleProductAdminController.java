@@ -12,6 +12,7 @@ import com.example.limitedticketing.sale.infrastructure.adapter.in.web.response.
 import com.example.limitedticketing.shared.api.ApiResponse;
 import jakarta.validation.Valid;
 import java.net.URI;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@Profile("!worker")
 @RequestMapping("/api/admin/sale-products")
 public class SaleProductAdminController {
 

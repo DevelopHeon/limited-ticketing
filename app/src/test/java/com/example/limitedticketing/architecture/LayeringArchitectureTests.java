@@ -144,7 +144,7 @@ class LayeringArchitectureTests {
     void portsAreInterfaces(String module) {
         String base = ROOT + "." + module;
         classes().that().resideInAnyPackage(base + ".application.port.in..", base + ".application.port.out..")
-            .and().resideOutsideOfPackages(base + ".application.port.in.dto..", base + ".application.port.out.dto..")
+            .and().resideOutsideOfPackages(base + ".application.port.in.dto..", base + ".application.port.in.worker.dto..", base + ".application.port.out.dto..")
             .and().doNotHaveSimpleName("package-info")
             .should().beInterfaces()
             .because("Port의 계약과 진입 Service 또는 Adapter의 구현을 분리한다")

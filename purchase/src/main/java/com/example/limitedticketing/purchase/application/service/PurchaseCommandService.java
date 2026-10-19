@@ -2,7 +2,6 @@ package com.example.limitedticketing.purchase.application.service;
 
 import com.example.limitedticketing.purchase.application.port.out.InventoryReservationPort;
 import com.example.limitedticketing.purchase.application.port.out.MemberEligibilityPort;
-import com.example.limitedticketing.purchase.application.port.out.PurchaseEventPublisherPort;
 import com.example.limitedticketing.purchase.application.port.out.SaleProductQueryPort;
 import com.example.limitedticketing.purchase.application.port.out.dto.PurchasableSaleProduct;
 import com.example.limitedticketing.purchase.application.usecase.CancelPurchaseUseCase;
@@ -32,22 +31,19 @@ public class PurchaseCommandService implements ReservePurchaseUseCase, MarkPurch
     private final InventoryReservationPort inventoryReservationPort;
     private final PurchaseRepository purchaseRepository;
     private final Clock clock;
-    private final PurchaseEventPublisherPort purchaseEventPublisherPort;
 
     public PurchaseCommandService(
         MemberEligibilityPort memberEligibilityPort,
         SaleProductQueryPort saleProductQueryPort,
         InventoryReservationPort inventoryReservationPort,
         PurchaseRepository purchaseRepository,
-        Clock clock,
-        PurchaseEventPublisherPort purchaseEventPublisherPort
+        Clock clock
     ) {
         this.memberEligibilityPort = memberEligibilityPort;
         this.saleProductQueryPort = saleProductQueryPort;
         this.inventoryReservationPort = inventoryReservationPort;
         this.purchaseRepository = purchaseRepository;
         this.clock = clock;
-        this.purchaseEventPublisherPort = purchaseEventPublisherPort;
     }
 
     @Transactional
@@ -80,7 +76,6 @@ public class PurchaseCommandService implements ReservePurchaseUseCase, MarkPurch
         }
 
         inventoryReservationPort.reserve(saleProduct.saleProductId(), PURCHASE_QUANTITY);
-        purchaseEventPublisherPort.publish(purchase.reservationEvent());
 
         return reservationResultOf(purchase, command.saleProductId());
     }

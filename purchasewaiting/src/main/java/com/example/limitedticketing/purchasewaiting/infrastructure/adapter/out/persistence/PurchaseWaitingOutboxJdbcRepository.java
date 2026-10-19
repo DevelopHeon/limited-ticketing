@@ -1,0 +1,76 @@
+package com.example.limitedticketing.purchasewaiting.infrastructure.adapter.out.persistence;
+
+import com.example.limitedticketing.purchasewaiting.infrastructure.adapter.out.persistence.record.ReservationOutboxRecord;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Repository;
+
+@Repository
+public class PurchaseWaitingOutboxJdbcRepository {
+
+    private static final String REQUESTED_EVENT_TYPE = "PurchaseReservationRequested";
+    private final JdbcTemplate jdbcTemplate;
+
+    public PurchaseWaitingOutboxJdbcRepository(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    public void insertIfAbsent(ReservationOutboxRecord record) {
+        jdbcTemplate.update("""
+            INSERT INTO reservation_job_outbox
+                (event_id, waiting_entry_id, sale_product_id, processing_token, event_type,
+                 topic, message_key, payload, created_at, next_attempt_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (waiting_entry_id, event_type, processing_token) DO NOTHING
+            """, record.eventId(), record.waitingEntryId(), record.saleProductId(), record.processingToken(), record.eventType(),
+            record.topic(), record.messageKey(), record.payload(), record.createdAt(), record.createdAt());
+    }
+
+    public boolean containsRequest(UUID eventId, UUID entryId, Long saleProductId, UUID token) {
+        return Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+            SELECT EXISTS (SELECT 1 FROM reservation_job_outbox
+              WHERE event_id = ? AND waiting_entry_id = ? AND sale_product_id = ?
+                AND processing_token = ? AND event_type = ?)
+            """, Boolean.class, eventId, entryId, saleProductId, token, REQUESTED_EVENT_TYPE));
+    }
+
+    public Optional<LocalDateTime> findPublishedAt(UUID entryId, UUID token) {
+        return jdbcTemplate.query("""
+            SELECT published_at FROM reservation_job_outbox WHERE waiting_entry_id = ?
+              AND processing_token = ? AND event_type = ? AND published_at IS NOT NULL
+            """, (rs, row) -> rs.getObject("published_at", LocalDateTime.class),
+            entryId, token, REQUESTED_EVENT_TYPE).stream().findFirst();
+    }
+
+    public List<ReservationOutboxRecord> findReadyForUpdate(LocalDateTime now, int limit) {
+        return jdbcTemplate.query("""
+            SELECT event_id, waiting_entry_id, sale_product_id, processing_token, event_type,
+                   topic, message_key, payload, created_at, publish_attempts FROM reservation_job_outbox
+            WHERE published_at IS NULL AND next_attempt_at <= ?
+            ORDER BY created_at, event_id LIMIT ? FOR UPDATE SKIP LOCKED
+            """, (rs, row) -> new ReservationOutboxRecord(rs.getObject("event_id", UUID.class),
+            rs.getObject("waiting_entry_id", UUID.class), rs.getLong("sale_product_id"),
+            rs.getObject("processing_token", UUID.class), rs.getString("event_type"),
+            rs.getString("topic"), rs.getString("message_key"), rs.getString("payload"),
+            rs.getObject("created_at", LocalDateTime.class), rs.getInt("publish_attempts")), now, limit);
+    }
+
+    public void markPublished(UUID eventId, LocalDateTime now) {
+        jdbcTemplate.update("UPDATE reservation_job_outbox SET published_at = ?, publish_attempts = publish_attempts + 1, failure_code = NULL WHERE event_id = ?", now, eventId);
+    }
+
+    public void recordFailure(UUID eventId, LocalDateTime nextAttempt, String failureCode) {
+        jdbcTemplate.update("UPDATE reservation_job_outbox SET publish_attempts = publish_attempts + 1, next_attempt_at = ?, failure_code = ? WHERE event_id = ?", nextAttempt, failureCode, eventId);
+    }
+
+    public long countPending() {
+        return jdbcTemplate.queryForObject("SELECT count(*) FROM reservation_job_outbox WHERE published_at IS NULL", Long.class);
+    }
+
+    public double oldestPendingSeconds(LocalDateTime now) {
+        return jdbcTemplate.queryForObject("SELECT coalesce(greatest(extract(epoch FROM (?::timestamp - min(created_at))), 0), 0) FROM reservation_job_outbox WHERE published_at IS NULL", Double.class, now);
+    }
+}

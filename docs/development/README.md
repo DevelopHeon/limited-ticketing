@@ -15,11 +15,11 @@
 - JDK 17
 - Docker 및 Docker Compose
 
-### PostgreSQL과 Redis 실행
+### PostgreSQL·Redis·Kafka 실행
 
 ```bash
 test -f .env || cp .env.example .env
-docker compose up -d
+docker compose --profile kafka up -d
 docker compose ps
 ```
 
@@ -30,6 +30,7 @@ docker compose ps
 | Application | `http://localhost:8081` |
 | PostgreSQL | `localhost:5432/limited_ticketing` |
 | Redis | `localhost:6379` |
+| Kafka bootstrap | `localhost:19092,localhost:29092,localhost:39092` |
 
 ### 애플리케이션 실행
 
@@ -43,10 +44,10 @@ Flyway가 시작 시 [DB migration](../../app/src/main/resources/db/migration)�
 
 | 환경 변수 | 기본값 | 설명 |
 |---|---:|---|
-| `QUEUE_MAX_OUTSTANDING` | 10000 | 상품별 WAITING + PROCESSING 접수 상한 |
-| `QUEUE_GLOBAL_CONCURRENT_PROCESSING` | 10 | 앱 전체 실행 스레드 수, 내부 대기 버퍼 0 |
+| `QUEUE_MAX_OUTSTANDING` | 10000 | 상품별 WAITING + DISPATCHED + PROCESSING 접수 상한 |
+| `QUEUE_GLOBAL_CONCURRENT_PROCESSING` | 10 | DB가 보호하는 전체 DISPATCHED + PROCESSING 입장 상한 |
 | `DB_POOL_MAX_SIZE` | 30 | Hikari 최대 연결 수 |
-| `QUEUE_MAX_CONCURRENT_PROCESSING` | 10 | 상품별 동시 DB 예약 처리 수 |
+| `QUEUE_MAX_CONCURRENT_PROCESSING` | 10 | 상품별 DISPATCHED + PROCESSING 입장 상한 |
 | `QUEUE_CLAIM_BATCH_SIZE` | 10 | Worker가 한 번에 claim하는 최대 항목 수 |
 | `QUEUE_WORKER_FIXED_DELAY` | 100ms | 대기 항목 claim 주기 |
 | `QUEUE_WORKER_INITIAL_DELAY` | 1000ms | 애플리케이션 시작 후 첫 Worker 실행 지연 |
@@ -55,7 +56,38 @@ Flyway가 시작 시 [DB migration](../../app/src/main/resources/db/migration)�
 | `QUEUE_RECOVERY_BATCH_SIZE` | 1000 | Recovery의 DB keyset 및 존재 확인 배치 크기 |
 | `QUEUE_PROCESSING_TIMEOUT_SECONDS` | 30 | 처리 시작 권한의 lease, 실행 중 잠긴 행은 회수하지 않음 |
 
-Worker는 외부 결과 트랜잭션과 내부 예약 트랜잭션에서 연결을 각각 사용한다. `DB_POOL_MAX_SIZE`를 전체 Worker 수보다 크게 두고 HTTP·만료·복구 작업의 여유도 확보한다. 기본값은 Worker 10·최대 연결 30이다. 연결 여유가 부족하면 Worker 수를 줄인다. V6 적용 전 이전 앱을 중지하고 새 버전만 실행한다.
+Consumer의 외부 결과 transaction과 내부 예약 transaction은 연결을 각각 사용한다. 기본 Consumer concurrency는 3이며 Hikari 풀은 30이다. 여러 Worker를 실행하면 모든 Consumer·HTTP·Publisher·복구 작업의 연결 여유를 함께 계산한다. V7 적용 전 이전 Worker를 중지하고 새 버전만 실행한다.
+
+### API와 Worker 역할 분리
+
+기본 `local`은 API·Dispatcher·Publisher·Consumer·복구를 함께 실행한다. 같은 산출물을 분리할 때는 두 터미널을 사용한다. 기존 DB·Redis·Kafka와 같은 설정을 공유하며 별도 Compose project를 만들지 않는다.
+
+```bash
+./gradlew :app:bootJar
+SPRING_PROFILES_ACTIVE=local,api java -jar app/build/libs/app-0.0.1-SNAPSHOT.jar
+```
+
+```bash
+SPRING_PROFILES_ACTIVE=local,worker java -jar app/build/libs/app-0.0.1-SNAPSHOT.jar
+```
+
+실행 중인 JAR 경로에 다시 `bootJar`를 빌드하면 지연 클래스 로딩이 실패할 수 있다. 재빌드 전 앱을 중지하거나, 검증할 JAR를 Git 제외 결과 경로에 복사해 고정하고 두 역할이 같은 복사본을 사용한다.
+
+API 기본 포트는 8081, Worker는 8082(`WORKER_PORT`)다. API는 업무 HTTP만 제공하고 Dispatcher·Publisher·Consumer·만료·복구 스케줄러를 실행하지 않는다. Worker는 업무 Controller를 제공하지 않으며 health와 관리자 metrics를 노출한다. `api,worker`를 동시에 지정하면 시작을 거부한다. 통합 실행 중인 앱과 분리 역할을 중복 실행하지 않는다.
+
+Kafka는 combined KRaft 3개 노드·고정 image digest·RF3·minISR2를 사용한다. 각 노드는 CPU 0.75·메모리 768MiB·JVM heap 384MiB다. reservation과 DLT topic은 각각 6 partitions다. `KAFKA_BOOTSTRAP_SERVERS`로 호스트 연결을 변경할 수 있다. 이 로컬 PLAINTEXT 구성은 운영 인증 구성이 아니다.
+
+### Kafka 관찰과 복구
+
+```bash
+docker compose --profile kafka exec -T kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:9092 --describe --topic limited-ticketing.purchasewaiting.reservation.v1
+docker compose --profile kafka exec -T kafka-1 /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server kafka-1:9092 --describe --group purchasewaiting-reservation-v1
+curl -H 'X-Admin-Id: admin' http://localhost:8082/actuator/prometheus
+```
+
+통합 실행이면 metrics 포트도 8081이다. 분리 실행에서 기존 Prometheus 기본 대상은 API 8081이며 Worker metrics는 8082에서 별도로 확인한다. `reservation.outbox.pending`, `reservation.outbox.oldest.seconds`, `reservation.dispatched.oldest.seconds`, 상태별 `reservation.waiting.entries`, `reservation.execution.attempts`, `reservation.consumer.duration`과 Kafka client의 lag·assignment 지표를 함께 본다. Worker의 전달 지연 Monitor가 60초 주기로 확인해 60초 이상인 경우 WARN을 남긴다. Broker·Publisher·Consumer 상태와 token을 조사한다.
+
+JSON/version/key 오류는 DLT 전달 확인 후 offset을 저장한다. DB 확인 또는 DLT 전달이 불가해 Consumer가 정지하면 먼저 원인을 해결한 뒤 Worker를 재시작한다. offset을 임의로 건너뛰지 않는다. 기술 FAILED 또는 발행 후 60초 이상 지난 DISPATCHED는 관리자 `POST /api/admin/queue-entries/{id}/replay`로 재처리하며, 허용·거부 조건은 [현재 계약](../architecture/purchase-waiting.md#관리자-재처리)을 따른다.
 
 직접 예약 HTTP를 비교 측정할 때만 `SPRING_PROFILES_ACTIVE=local,baseline`으로 실행한다. 기본 `local`에서는 직접 예약 HTTP를 제공하지 않는다.
 
@@ -86,6 +118,7 @@ X-Admin-Id: admin
 | `POST` | `/api/payments/{id}/fail` | 결제 실패 처리 |
 | `POST` | `/api/sale-products/{id}/queue-entries` | 대기열 기반 예약 접수 |
 | `GET` | `/api/queue-entries/{id}` | 대기 순번 및 처리 상태 조회 |
+| `POST` | `/api/admin/queue-entries/{id}/replay` | 기술 실패·장기 전달 대기 재처리 |
 
 요청과 응답의 상세 계약은 Controller 코드 및 [대기열 명세](../architecture/purchase-waiting.md)를 참고합니다.
 

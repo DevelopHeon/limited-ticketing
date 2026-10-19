@@ -11,7 +11,6 @@ import static org.mockito.Mockito.when;
 import com.example.limitedticketing.member.domain.exception.MemberException;
 import com.example.limitedticketing.purchase.application.port.out.InventoryReservationPort;
 import com.example.limitedticketing.purchase.application.port.out.MemberEligibilityPort;
-import com.example.limitedticketing.purchase.application.port.out.PurchaseEventPublisherPort;
 import com.example.limitedticketing.purchase.application.port.out.SaleProductQueryPort;
 import com.example.limitedticketing.purchase.application.port.out.dto.PurchasableSaleProduct;
 import com.example.limitedticketing.purchase.application.usecase.dto.command.CancelPurchaseCommand;
@@ -56,21 +55,19 @@ class PurchaseCommandServiceTest {
     private InventoryReservationPort inventoryReservationPort;
     @Mock
     private PurchaseRepository purchaseRepository;
-    @Mock
-    private PurchaseEventPublisherPort purchaseEventPublisherPort;
 
     private PurchaseCommandService purchaseCommandService;
 
     @BeforeEach
     void createService() {
         purchaseCommandService = new PurchaseCommandService(
-            memberEligibilityPort, saleProductQueryPort, inventoryReservationPort, purchaseRepository, CLOCK, purchaseEventPublisherPort
+            memberEligibilityPort, saleProductQueryPort, inventoryReservationPort, purchaseRepository, CLOCK
         );
     }
 
     @Test
-    @DisplayName("신규 구매는 판매 가격으로 5분간 예약하고 재고 한 개와 예약 이벤트를 생성한다")
-    void newPurchaseReservesOneItemForFiveMinutesAndPublishesItsEvent() {
+    @DisplayName("신규 구매는 판매 가격으로 5분간 예약하고 재고 한 개를 예약한다")
+    void newPurchaseReservesOneItemForFiveMinutes() {
         when(saleProductQueryPort.findPurchasable(2L, NOW))
             .thenReturn(new PurchasableSaleProduct(2L, PRICE));
         Purchase saved = purchase(2L, PurchaseStatus.PENDING_PAYMENT);
@@ -87,12 +84,11 @@ class PurchaseCommandServiceTest {
         assertThat(result).isEqualTo(new PurchaseReservationResult(10L, PurchaseStatus.PENDING_PAYMENT, NOW.plusMinutes(5)));
         verify(memberEligibilityPort).ensurePurchasable(1L);
         verify(inventoryReservationPort).reserve(2L, 1);
-        verify(purchaseEventPublisherPort).publish(saved.reservationEvent());
     }
 
     @ParameterizedTest(name = "{displayName} [{arguments}]")
     @EnumSource(PurchaseStatus.class)
-    @DisplayName("같은 요청의 재시도는 구매 상태와 관계없이 기존 결과를 반환하고 재고와 이벤트를 반복하지 않는다")
+    @DisplayName("같은 요청의 재시도는 구매 상태와 관계없이 기존 결과를 반환하고 재고를 반복 예약하지 않는다")
     void retryReturnsTheExistingPurchaseWithoutRepeatingSideEffects(PurchaseStatus status) {
         Purchase existing = purchase(2L, status);
         when(purchaseRepository.findByMemberIdAndPurchaseRequestKey(1L, "purchase-1")).thenReturn(Optional.of(existing));
@@ -101,7 +97,7 @@ class PurchaseCommandServiceTest {
 
         assertThat(result).isEqualTo(new PurchaseReservationResult(10L, status, existing.getExpiresAt()));
         verify(purchaseRepository, never()).saveIfAbsent(any());
-        verifyNoInteractions(memberEligibilityPort, saleProductQueryPort, inventoryReservationPort, purchaseEventPublisherPort);
+        verifyNoInteractions(memberEligibilityPort, saleProductQueryPort, inventoryReservationPort);
     }
 
     @Test
@@ -115,7 +111,7 @@ class PurchaseCommandServiceTest {
 
         assertThat(result.purchaseId()).isEqualTo(winner.getId());
         assertThat(result.status()).isEqualTo(PurchaseStatus.PENDING_PAYMENT);
-        verifyNoInteractions(inventoryReservationPort, purchaseEventPublisherPort);
+        verifyNoInteractions(inventoryReservationPort);
     }
 
     @Test
@@ -128,7 +124,7 @@ class PurchaseCommandServiceTest {
             .isInstanceOf(PurchaseException.class).extracting("code").isEqualTo("PURCHASE_REQUEST_KEY_REUSE");
 
         verify(purchaseRepository, never()).saveIfAbsent(any());
-        verifyNoInteractions(memberEligibilityPort, saleProductQueryPort, inventoryReservationPort, purchaseEventPublisherPort);
+        verifyNoInteractions(memberEligibilityPort, saleProductQueryPort, inventoryReservationPort);
     }
 
     @Test
@@ -140,7 +136,7 @@ class PurchaseCommandServiceTest {
         assertThatThrownBy(() -> purchaseCommandService.reserve(COMMAND)).isSameAs(rejection);
 
         verify(purchaseRepository, never()).saveIfAbsent(any());
-        verifyNoInteractions(saleProductQueryPort, inventoryReservationPort, purchaseEventPublisherPort);
+        verifyNoInteractions(saleProductQueryPort, inventoryReservationPort);
     }
 
     @Test
@@ -154,7 +150,7 @@ class PurchaseCommandServiceTest {
         assertThatThrownBy(() -> purchaseCommandService.cancel(new CancelPurchaseCommand(10L, 1L)))
             .isInstanceOf(PurchaseException.class).extracting("code").isEqualTo("INVALID_PURCHASE_STATE");
 
-        verifyNoInteractions(inventoryReservationPort, purchaseEventPublisherPort);
+        verifyNoInteractions(inventoryReservationPort);
     }
 
     private Purchase purchase(Long saleProductId, PurchaseStatus status) {

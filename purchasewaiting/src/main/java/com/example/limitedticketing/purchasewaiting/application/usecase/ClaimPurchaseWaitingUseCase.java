@@ -7,6 +7,4 @@ import java.util.Optional;
 public interface ClaimPurchaseWaitingUseCase {
 
     Optional<PurchaseWaitingEntry> claim(ClaimPurchaseWaitingCommand command);
-
-    Optional<PurchaseWaitingEntry> returnUnstartedClaim(ClaimPurchaseWaitingCommand command);
 }

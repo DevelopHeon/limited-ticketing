@@ -13,12 +13,12 @@ import com.example.limitedticketing.purchase.application.usecase.dto.result.Purc
 import org.springframework.stereotype.Service;
 
 @Service
-public class PurchasePaymentEntryService implements PurchasePaymentPort {
+public class PurchasePaymentPortService implements PurchasePaymentPort {
 
     private final FindPurchaseForPaymentUseCase findPurchaseForPaymentUseCase;
     private final MarkPurchasePaidUseCase markPurchasePaidUseCase;
 
-    public PurchasePaymentEntryService(
+    public PurchasePaymentPortService(
         FindPurchaseForPaymentUseCase findPurchaseForPaymentUseCase,
         MarkPurchasePaidUseCase markPurchasePaidUseCase
     ) {

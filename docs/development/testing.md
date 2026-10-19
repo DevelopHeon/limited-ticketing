@@ -68,7 +68,7 @@ python3 -m unittest discover -s observability/tests -p test_setup.py
 
 ArchUnit은 각 모듈 내부의 Domain·Application·입력/출력 Adapter와 DTO 의존 방향을 검사한다. Domain Repository는 Domain의 interface다. Input/Output Port와 내부 UseCase도 interface이며 각 구현은 Service·Facade·infrastructure에 둔다. 입력 Adapter는 Input Port를 호출하고 내부 UseCase를 우회하지 않는다. 출력 Adapter는 자신의 입력 Adapter나 업무 구현을 호출하지 않는다.
 
-Input Port를 구현하는 진입 Service의 의존은 허용하지만, 내부 업무 Service가 자신의 Input Port·Facade를 역호출하는 것은 금지한다. 검사 대상은 운영 코드이며 테스트·생성 산출물은 제외한다. member·inventory처럼 HTTP/Scheduler 입력 Adapter가 없는 모듈에는 빈 입력 패키지를 강제하지 않는다. 나머지 필수 규칙은 대상이 없으면 실패한다. 모듈 간 공개 API·허용 의존·순환은 기존 Modulith 검증이 담당한다.
+Input Port를 구현하는 PortService의 의존은 허용하지만, 내부 업무 Service가 자신의 Input Port·Facade를 역호출하는 것은 금지한다. 검사 대상은 운영 코드이며 테스트·생성 산출물은 제외한다. member·inventory처럼 HTTP/Scheduler 입력 Adapter가 없는 모듈에는 빈 입력 패키지를 강제하지 않는다. 나머지 필수 규칙은 대상이 없으면 실패한다. 모듈 간 공개 API·허용 의존·순환은 기존 Modulith 검증이 담당한다.
 
 규칙을 변경하면 정상 코드 통과와 대표 금지 의존성의 실패를 확인한다. 임시 위반은 원복하고 전체 `./gradlew check`를 실행한다. 검사 범위·허용 의존성을 완화하거나 실패를 비활성화해 통과시키지 않는다. 검사 적용·실행 상태는 [로드맵](../plans/roadmap.md)이 소유한다.
 

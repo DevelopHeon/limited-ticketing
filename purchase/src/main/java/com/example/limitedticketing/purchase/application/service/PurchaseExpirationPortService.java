@@ -5,11 +5,11 @@ import com.example.limitedticketing.purchase.application.usecase.ExpirePurchases
 import org.springframework.stereotype.Service;
 
 @Service
-public class PurchaseExpirationEntryService implements PurchaseExpirationPort {
+public class PurchaseExpirationPortService implements PurchaseExpirationPort {
 
     private final ExpirePurchasesUseCase expirePurchasesUseCase;
 
-    public PurchaseExpirationEntryService(ExpirePurchasesUseCase expirePurchasesUseCase) {
+    public PurchaseExpirationPortService(ExpirePurchasesUseCase expirePurchasesUseCase) {
         this.expirePurchasesUseCase = expirePurchasesUseCase;
     }
 

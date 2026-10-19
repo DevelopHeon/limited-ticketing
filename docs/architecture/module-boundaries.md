@@ -113,7 +113,15 @@ package com.example.limitedticketing.member.application.port.in;
     └── out/...                  Redis·이벤트·실행기 등 실제 필요한 구현
 ```
 
-Controller·Scheduler 자체가 Input Adapter이며 Input Port를 호출한다. 일반 진입 EntryService는 Input/Output과 내부 DTO를 변환해 UseCase에 연결한다. 실제 여러 UseCase를 조합하는 PurchaseWaitingCommandFacade만 facade에 둔다. Application 내부 업무 호출은 UseCase를 사용한다. 의존성 필드·생성자·테스트에는 Port·UseCase·Repository·Service·Adapter 등 타입의 역할 접미사를 유지한다.
+Controller·Scheduler 자체가 Input Adapter이며 Input Port를 호출한다. 일반 진입 PortService는 Input/Output과 내부 DTO를 변환해 UseCase에 연결한다. 실제 여러 UseCase를 조합하는 PurchaseWaitingCommandFacade만 facade에 둔다. Application 내부 업무 호출은 UseCase를 사용한다. 의존성 필드·생성자·테스트에는 Port·UseCase·Repository·Service·Adapter 등 타입의 역할 접미사를 유지한다.
+
+| Application 구현 | 역할 | 예시 |
+|---|---|---|
+| PortService | Input Port 구현, 공개 DTO와 내부 DTO 변환, 개별 UseCase 연결 | InventoryCommandPortService |
+| Facade | Input Port 구현, 여러 UseCase의 실행 순서 조합 | PurchaseWaitingCommandFacade |
+| 업무 Service | 내부 UseCase 구현, transaction·Domain·Repository·Output Port 사용 | InventoryCommandService |
+
+PortService와 Facade는 같은 Application 계층의 진입 구현이다. Facade 앞에 별도 PortService를 추가하지 않는다. PortService는 이 프로젝트에서 사용하는 Input Port 구현 명명 규칙이며 새로운 계층은 아니다.
 
 ### Aggregate 영속성과 Application 출력 계약
 
@@ -124,7 +132,7 @@ Controller·Scheduler 자체가 Input Adapter이며 Input Port를 호출한다. 
 판매 목록의 필터·정렬·페이지 조회는 SaleProductSearchPort, Redis 대기·복구·입구 제한과 외부 모듈 호출·이벤트 발행은 Application Output Port다. 상품별 순번 발급도 Aggregate 저장 계약과 구분해 기존 Sequence Port를 유지한다.
 
 ```text
-외부 입력 → Input Port → EntryService / Facade → UseCase → 업무 Service
+외부 입력 → Input Port → PortService / Facade → UseCase → 업무 Service
   ├─ Aggregate 영속화 → Domain Repository → PersistenceAdapter
   └─ 검색·외부 기능 → Application Output Port → Driven Adapter
 ```

@@ -18,14 +18,14 @@ import com.example.limitedticketing.sale.application.usecase.dto.result.SaleProd
 import org.springframework.stereotype.Service;
 
 @Service
-public class SaleProductAdminEntryService implements SaleProductAdminPort {
+public class SaleProductAdminPortService implements SaleProductAdminPort {
 
     private final CreateSaleProductUseCase createSaleProductUseCase;
     private final ChangeSalePeriodUseCase changeSalePeriodUseCase;
     private final OpenSaleProductUseCase openSaleProductUseCase;
     private final CloseSaleProductUseCase closeSaleProductUseCase;
 
-    public SaleProductAdminEntryService(
+    public SaleProductAdminPortService(
         CreateSaleProductUseCase createSaleProductUseCase,
         ChangeSalePeriodUseCase changeSalePeriodUseCase,
         OpenSaleProductUseCase openSaleProductUseCase,

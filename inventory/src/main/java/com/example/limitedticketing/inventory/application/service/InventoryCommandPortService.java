@@ -16,14 +16,14 @@ import com.example.limitedticketing.inventory.application.usecase.dto.command.Re
 import org.springframework.stereotype.Service;
 
 @Service
-public class InventoryCommandEntryService implements InventoryCommandPort {
+public class InventoryCommandPortService implements InventoryCommandPort {
 
     private final InitializeInventoryUseCase initializeInventoryUseCase;
     private final ReserveInventoryUseCase reserveInventoryUseCase;
     private final ConfirmInventoryReservationUseCase confirmInventoryReservationUseCase;
     private final ReleaseInventoryReservationUseCase releaseInventoryReservationUseCase;
 
-    public InventoryCommandEntryService(
+    public InventoryCommandPortService(
         InitializeInventoryUseCase initializeInventoryUseCase,
         ReserveInventoryUseCase reserveInventoryUseCase,
         ConfirmInventoryReservationUseCase confirmInventoryReservationUseCase,

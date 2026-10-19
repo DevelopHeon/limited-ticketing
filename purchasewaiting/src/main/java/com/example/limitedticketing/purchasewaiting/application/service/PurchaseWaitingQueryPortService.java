@@ -9,11 +9,11 @@ import com.example.limitedticketing.purchasewaiting.application.usecase.dto.resu
 import org.springframework.stereotype.Service;
 
 @Service
-public class PurchaseWaitingQueryService implements PurchaseWaitingQueryPort {
+public class PurchaseWaitingQueryPortService implements PurchaseWaitingQueryPort {
 
     private final FindPurchaseWaitingUseCase findPurchaseWaitingUseCase;
 
-    public PurchaseWaitingQueryService(FindPurchaseWaitingUseCase findPurchaseWaitingUseCase) {
+    public PurchaseWaitingQueryPortService(FindPurchaseWaitingUseCase findPurchaseWaitingUseCase) {
         this.findPurchaseWaitingUseCase = findPurchaseWaitingUseCase;
     }
 

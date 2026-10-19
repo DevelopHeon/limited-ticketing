@@ -127,10 +127,10 @@ HTTP Controller → PurchaseWaitingCommandPort → PurchaseWaitingCommandFacade
  → EnqueuePurchaseWaitingUseCase → EnqueuePurchaseWaitingService
  → Domain Repository → PurchaseWaitingPersistenceAdapter
 
-HTTP Controller → PurchaseWaitingQueryPort → PurchaseWaitingQueryService
+HTTP Controller → PurchaseWaitingQueryPort → PurchaseWaitingQueryPortService
  → FindPurchaseWaitingUseCase → FindPurchaseWaitingService
 
-Scheduler → PurchaseWaitingWorkerPort → PurchaseWaitingWorkerService
+Scheduler → PurchaseWaitingWorkerPort → PurchaseWaitingWorkerPortService
  → Dispatch/Recover UseCase → Service → Output Port → Adapter
 
 Process Service → ReserveWaitingPurchaseUseCase → ReserveWaitingPurchaseService
@@ -139,7 +139,7 @@ Process Service → ReserveWaitingPurchaseUseCase → ReserveWaitingPurchaseServ
 
 Controller는 HTTP 경로·헤더·인증 주체를 Input으로 변환하고 HTTP 응답을 만든다. Scheduler는 실행 주기를 맡는다. 이들은 Input Port를 호출하며 내부 UseCase나 구현 Service를 직접 참조하지 않는다.
 
-PurchaseWaitingCommandFacade가 접수 UseCase의 UUID를 받아 조회 UseCase를 호출한다. Facade 전체를 transaction으로 감싸지 않아 접수 커밋과 Redis afterCommit 반영 후 조회하는 기존 경계를 유지한다. 단순 조회와 Worker 진입은 각각 PurchaseWaitingQueryService·PurchaseWaitingWorkerService가 Port를 구현해 내부 UseCase로 연결한다. 조합이 없는 기능에 Facade를 일괄 추가하지 않는다.
+PurchaseWaitingCommandFacade가 접수 UseCase의 UUID를 받아 조회 UseCase를 호출한다. Facade 전체를 transaction으로 감싸지 않아 접수 커밋과 Redis afterCommit 반영 후 조회하는 기존 경계를 유지한다. 단순 조회와 Worker 진입은 각각 PurchaseWaitingQueryPortService·PurchaseWaitingWorkerPortService가 Port를 구현해 내부 UseCase로 연결한다. 조합이 없는 기능에 Facade를 일괄 추가하지 않는다.
 
 같은 모듈의 Application 내부 업무 호출은 UseCase interface를 사용하고, 다른 모듈과 입력 Adapter는 Input Port를 호출한다. Aggregate 저장소 호출은 Domain Repository를, Redis·다른 모듈 기능 등 Application의 외부 기능 호출은 Output Port를 사용한다. Worker Port는 Scheduler의 코어 진입 계약이며 다른 모듈에 공개하는 api는 아니다.
 

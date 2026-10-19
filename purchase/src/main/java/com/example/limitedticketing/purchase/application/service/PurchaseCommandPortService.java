@@ -12,12 +12,12 @@ import com.example.limitedticketing.purchase.application.usecase.dto.result.Purc
 import org.springframework.stereotype.Service;
 
 @Service
-public class PurchaseCommandEntryService implements PurchaseCommandPort {
+public class PurchaseCommandPortService implements PurchaseCommandPort {
 
     private final ReservePurchaseUseCase reservePurchaseUseCase;
     private final CancelPurchaseUseCase cancelPurchaseUseCase;
 
-    public PurchaseCommandEntryService(
+    public PurchaseCommandPortService(
         ReservePurchaseUseCase reservePurchaseUseCase,
         CancelPurchaseUseCase cancelPurchaseUseCase
     ) {

@@ -6,12 +6,12 @@ import com.example.limitedticketing.purchasewaiting.application.usecase.RecoverP
 import org.springframework.stereotype.Service;
 
 @Service
-public class PurchaseWaitingWorkerService implements PurchaseWaitingWorkerPort {
+public class PurchaseWaitingWorkerPortService implements PurchaseWaitingWorkerPort {
 
     private final DispatchPurchaseWaitingUseCase dispatchPurchaseWaitingUseCase;
     private final RecoverPurchaseWaitingUseCase recoverPurchaseWaitingUseCase;
 
-    public PurchaseWaitingWorkerService(
+    public PurchaseWaitingWorkerPortService(
         DispatchPurchaseWaitingUseCase dispatchPurchaseWaitingUseCase,
         RecoverPurchaseWaitingUseCase recoverPurchaseWaitingUseCase
     ) {

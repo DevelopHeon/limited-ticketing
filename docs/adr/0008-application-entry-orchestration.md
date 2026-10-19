@@ -33,4 +33,8 @@ PurchaseWaitingCommandAdapter는 접수 UseCase를 실행한 뒤 조회 UseCase�
 
 ## 전체 업무 모듈 적용
 
-같은 입력 Adapter·Port·UseCase·진입 Service 책임 구분을 member·inventory·sale·purchase·payment에도 적용한다. 단순 연결은 EntryService, 실제 UseCase 조합은 Facade가 맡는다. Aggregate 영속 계약은 [ADR 0009](0009-domain-repository-ownership.md)를 따른다. 적용·검증 진행 상태는 [로드맵](../plans/roadmap.md)이 소유하며 위 실패 수치는 최초 전환 당시의 역사적 결과다.
+같은 입력 Adapter·Port·UseCase·진입 Service 책임 구분을 member·inventory·sale·purchase·payment에도 적용한다. 단순 연결은 PortService, 실제 UseCase 조합은 Facade가 맡는다. Aggregate 영속 계약은 [ADR 0009](0009-domain-repository-ownership.md)를 따른다. 적용·검증 진행 상태는 [로드맵](../plans/roadmap.md)이 소유하며 위 실패 수치는 최초 전환 당시의 역사적 결과다.
+
+## 명명 규칙 정리 · 2026-10-19
+
+사용자 논의에 따라 Input Port의 단순 연결 구현을 PortService로 통일한다. EntryService 9개와 위 최초 전환 당시의 PurchaseWaitingQueryService·PurchaseWaitingWorkerService를 각각 대응하는 PortService 이름으로 변경한다. Facade의 업무 조합, 내부 UseCase 구현 Service, 공개 계약과 transaction 경계는 유지한다. 별도 계층을 추가하는 결정은 아니며 현재 이름과 역할은 [모듈 설계](../architecture/module-boundaries.md#레이어-구조)를 따른다.

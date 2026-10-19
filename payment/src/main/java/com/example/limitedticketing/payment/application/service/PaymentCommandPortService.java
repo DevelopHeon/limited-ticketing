@@ -16,13 +16,13 @@ import com.example.limitedticketing.payment.application.usecase.dto.result.Payme
 import org.springframework.stereotype.Service;
 
 @Service
-public class PaymentCommandEntryService implements PaymentCommandPort {
+public class PaymentCommandPortService implements PaymentCommandPort {
 
     private final CreatePaymentUseCase createPaymentUseCase;
     private final ApprovePaymentUseCase approvePaymentUseCase;
     private final FailPaymentUseCase failPaymentUseCase;
 
-    public PaymentCommandEntryService(
+    public PaymentCommandPortService(
         CreatePaymentUseCase createPaymentUseCase,
         ApprovePaymentUseCase approvePaymentUseCase,
         FailPaymentUseCase failPaymentUseCase

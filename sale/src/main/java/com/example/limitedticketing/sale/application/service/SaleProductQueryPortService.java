@@ -19,13 +19,13 @@ import com.example.limitedticketing.sale.domain.model.SaleStatus;
 import org.springframework.stereotype.Service;
 
 @Service
-public class SaleProductQueryEntryService implements SaleProductQueryPort {
+public class SaleProductQueryPortService implements SaleProductQueryPort {
 
     private final FindSaleProductDetailUseCase findSaleProductDetailUseCase;
     private final SaleProductExistsUseCase saleProductExistsUseCase;
     private final FindSaleProductsUseCase findSaleProductsUseCase;
 
-    public SaleProductQueryEntryService(
+    public SaleProductQueryPortService(
         FindSaleProductDetailUseCase findSaleProductDetailUseCase,
         SaleProductExistsUseCase saleProductExistsUseCase,
         FindSaleProductsUseCase findSaleProductsUseCase

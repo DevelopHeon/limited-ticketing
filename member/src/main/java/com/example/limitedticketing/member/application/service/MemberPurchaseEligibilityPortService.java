@@ -7,11 +7,11 @@ import com.example.limitedticketing.member.application.usecase.dto.query.EnsureM
 import org.springframework.stereotype.Service;
 
 @Service
-public class MemberPurchaseEligibilityEntryService implements MemberPurchaseEligibilityPort {
+public class MemberPurchaseEligibilityPortService implements MemberPurchaseEligibilityPort {
 
     private final EnsureMemberPurchasableUseCase ensureMemberPurchasableUseCase;
 
-    public MemberPurchaseEligibilityEntryService(EnsureMemberPurchasableUseCase ensureMemberPurchasableUseCase) {
+    public MemberPurchaseEligibilityPortService(EnsureMemberPurchasableUseCase ensureMemberPurchasableUseCase) {
         this.ensureMemberPurchasableUseCase = ensureMemberPurchasableUseCase;
     }
 

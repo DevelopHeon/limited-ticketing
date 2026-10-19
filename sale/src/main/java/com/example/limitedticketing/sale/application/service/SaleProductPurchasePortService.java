@@ -9,11 +9,11 @@ import com.example.limitedticketing.sale.application.usecase.dto.result.Purchasa
 import org.springframework.stereotype.Service;
 
 @Service
-public class SaleProductPurchaseEntryService implements SaleProductPurchasePort {
+public class SaleProductPurchasePortService implements SaleProductPurchasePort {
 
     private final FindPurchasableSaleProductUseCase findPurchasableSaleProductUseCase;
 
-    public SaleProductPurchaseEntryService(FindPurchasableSaleProductUseCase findPurchasableSaleProductUseCase) {
+    public SaleProductPurchasePortService(FindPurchasableSaleProductUseCase findPurchasableSaleProductUseCase) {
         this.findPurchasableSaleProductUseCase = findPurchasableSaleProductUseCase;
     }
 

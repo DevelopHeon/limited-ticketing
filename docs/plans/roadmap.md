@@ -8,7 +8,7 @@
 - 1·2단계와 전체 모듈 구조·명명·문서 정리를 완료했다. Aggregate 영속성은 Domain Repository, 기술·다른 모듈 기능은 Application Output Port를 사용하는 기준을 유지한다.
 - 3단계(`b5b09ee` commit/push·Notion 기록 완료): [승인된 스펙](2026-10-19-stage-3-kafka-outbox.md)의 Kafka·Outbox·실행 예산·관리자 재처리·API/Worker 역할 분리와 현재 문서를 구현했다. Outbox SQL은 JdbcRepository로 분리했고 운영 구독자가 없던 Spring 구매 예약 이벤트는 제거했다.
 - 필수 검사와 작은 전달·복구 실험, 독립 리뷰·결함 수정·재리뷰를 마쳤다. 실행 중 중복은 ACK하지 않고 재전달하며 발행 backoff는 실제 실패 시점부터 계산한다.
-- 사용자가 별도로 요청한 Outbox 비동기 리팩토링은 구현·필수 검증·독립 리뷰 수정·재리뷰를 마쳤다. 별도 한국어 commit과 기존 Notion 기록에 근거를 남기며 사용자 검토를 기다린다.
+- 사용자가 별도로 요청한 Outbox 비동기 리팩토링은 `d3088f4` commit/push·Notion 기록을 마쳤다. Kafka 조정 값의 YAML 이동과 사용자가 수정한 Outbox Scheduler 설정 키도 후속 변경으로 구현·검증·독립 리뷰를 마쳤다. 한국어 commit/push와 기존 Notion 기록 갱신 후 사용자 검토를 기다린다.
 - 다음 단계는 사용자의 명시적인 시작 요청 후 논의한다. 4단계 캐시를 자동 시작하지 않는다.
 
 ## 단계별 진행
@@ -36,6 +36,8 @@
 후속 구현은 Claim/Lease·Kafka Future·인스턴스별 In-flight·제한된 콜백 Executor·독립 DB transaction을 포함한다. 동시 Claim, 만료 후 재선택과 이전 콜백 차단, 열린 transaction 진입 거부, 콜백 거부·DB 오류의 Permit 반환, ACK 뒤 DB 저장 실패 후 중복 발행의 구매·재고 멱등성을 검증했다. 기존 로컬 DB에서 V7→V8을 적용하고 health UP, 기존 Outbox 30개와 eventId/payload 합성 hash 보존을 확인한 뒤 검증 앱을 종료했다.
 
 독립 리뷰에서 호출자 transaction 중단만으로는 기존 연결·잠금이 해제되지 않는 점을 확인했다. 열린 transaction 진입을 NEVER로 거부하도록 수정하고 회귀의 RED→GREEN 및 전체 검사를 확인했다. 수정 부분 재리뷰에서도 추가 결함이 발견되지 않았다. 이 결과를 별도 한국어 commit/push와 기존 Notion 기록 갱신으로 보존하고 사용자 검토를 기다린다. 후속 리팩토링에서 3 Broker 장애 실험과 처리량 측정을 반복하지 않았다. 5,000건 부하·다중 Worker 처리량·장기 안정성·DB 자동 failover·운영 인증은 이번 완료 조건으로 수행하지 않았으며 달성했다고 주장하지 않는다.
+
+Kafka 설정 후속 작업은 `d3088f4`를 기준으로 한다. 기존 값은 유지하면서 Producer·Consumer·Listener와 Topic·DLT·ErrorHandler 조정 값을 YAML에서 읽도록 변경했다. Scheduler의 `publisher-fixed-delay` 키 수정도 사용자 요청으로 함께 포함한다. 설정 override가 무시되는 회귀 3개의 RED→GREEN을 확인했고 `./gradlew check :app:bootJar --continue`가 Java 256개 테스트에 실패·오류·skip 없이 통과했다. 독립 리뷰에서 변경 코드·호출부·통합 테스트·실행 결과를 교차 확인했고 결함은 발견되지 않았다. 설정 위치와 조정 범위는 [개발 안내](../development/README.md#kafka-관찰과-복구)를 따른다. 별도 성능 측정은 수행하지 않았다.
 
 ## 메시징 확장 판단 기준
 

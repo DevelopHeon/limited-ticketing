@@ -79,6 +79,20 @@ Kafka는 combined KRaft 3개 노드·고정 image digest·RF3·minISR2를 사용
 
 ### Kafka 관찰과 복구
 
+Kafka 조정 값은 [application.yml](../../app/src/main/resources/application.yml)에서 관리한다. Producer·Consumer는 Spring Boot의 `KafkaProperties`를 사용하고 Listener의 동시성·poll 시간·자동 시작도 같은 설정에서 읽는다.
+
+| 설정 경로 | 조정 대상 |
+|---|---|
+| `spring.kafka.producer` | ACK·멱등 발행·연결별 In-flight·전송/대기 제한 시간·직렬화 |
+| `spring.kafka.consumer` | poll당 최대 수신 건수·offset 초기 위치·자동 commit·역직렬화 |
+| `spring.kafka.listener` | `concurrency`, `poll-timeout`(예: `200ms`), `auto-startup` |
+| `limited-ticketing.kafka` | Topic 이름·공통 partition 수·RF·minISR·각 Topic 보존 시간(`*-retention-ms`)·DLT 응답 대기(`dead-letter-send-timeout-ms`) |
+| `limited-ticketing.kafka.consumer-retry` | ErrorHandler 재시도 간격(`interval-ms`)·추가 재시도 횟수(`max-retries`) |
+
+예를 들어 `SPRING_KAFKA_LISTENER_CONCURRENCY=2`로 동시성을 변경할 수 있다. Listener 동시성·poll 시간의 기본값은 각각 3·200ms이며 기존 값과 같다. 수동 ACK(`MANUAL_IMMEDIATE`)·DLT 전달 확인 후 offset 저장은 코드의 처리 계약으로 유지한다. `api` 프로필은 `auto-startup=true`여도 Consumer를 시작하지 않는다.
+
+`consumer-retry.max-retries=2`는 최초 호출 뒤 추가 2회다. 예약 업무의 3회 실행 예산과는 별개다. 두 Topic은 DLT가 원본 partition으로 전달되도록 공통 `partitions`를 쓴다. 기존 Topic의 partition 감소·RF·보존 설정 변경은 YAML 편집만으로 적용되지 않으므로 실제 Broker 설정을 확인한다.
+
 Outbox 발행은 짧은 Claim commit → Kafka Future → 별도 완료/실패 commit 순서다. 기본 In-flight 10·batch 10·Claim Lease 30초·DB 콜백 스레드 2·대기 큐 10이며 `limited-ticketing.kafka.outbox`에서 조정한다. 이 값은 인스턴스별 용량이며 DB 입장 cap이나 Kafka Producer의 연결별 `max.in.flight` 설정과 다르다. [발행 경계](../architecture/purchase-waiting.md#outbox-비동기-발행-경계)를 확인한다.
 
 `Outbox callback rejected`·`Outbox completion failed`는 Permit을 반환하고 미발행 Claim을 남긴다. Executor·DB 상태를 복구하면 Lease가 지난 행을 polling이 다시 선택한다. ACK를 이미 받았어도 재발행할 수 있으므로 SQL로 PUBLISHED를 강제로 표시하지 않는다. `Outbox callback lost claim ownership`는 만료·새 Claim·완료 이후의 오래된 콜백일 수 있다. eventId와 claim_id·claim_until·published_at을 함께 확인한다. 발행 시도는 Claim 시 증가하며 예약 실행 예산과 구분한다.

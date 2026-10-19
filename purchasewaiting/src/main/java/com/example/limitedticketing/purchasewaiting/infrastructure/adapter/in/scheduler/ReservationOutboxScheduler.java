@@ -14,7 +14,7 @@ public class ReservationOutboxScheduler {
         this.purchaseWaitingOutboxPublisherPort = purchaseWaitingOutboxPublisherPort;
     }
 
-    @Scheduled(fixedDelayString = "${limited-ticketing.kafka.publisher-delay:100}",
+    @Scheduled(fixedDelayString = "${limited-ticketing.kafka.publisher-fixed-delay:100}",
         initialDelayString = "${limited-ticketing.kafka.publisher-initial-delay:1000}")
     public void publishReadyMessages() {
         purchaseWaitingOutboxPublisherPort.publishReadyMessages();

@@ -44,6 +44,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -217,18 +218,26 @@ class PurchaseWaitingKafkaIntegrationTest {
     }
 
     @Test
-    @DisplayName("Kafka ACK 뒤 발행 완료 저장이 롤백되어 재발행해도 같은 구매와 재고 효과만 남긴다")
+    @DisplayName("Kafka ACK 뒤 완료 저장이 실패해도 Lease 복구로 재발행하며 구매와 재고 효과는 한 번만 남긴다")
     void brokerAckBeforePublisherRollbackAllowsSafeDuplicatePublish() throws Exception {
         PurchaseWaitingEntry entry = admitted();
-        doThrow(new DataAccessResourceFailureException("publisher database commit failed"))
-            .when(purchaseWaitingOutboxPort).markPublished(any(), any());
-        assertThatThrownBy(() -> publishReservationOutboxUseCase.publishReady()).isInstanceOf(DataAccessResourceFailureException.class);
-        awaitStatus(entry.getId(), PurchaseWaitingStatus.RESERVED);
-        assertThat(purchaseWaitingOutboxPort.findPublishedAt(entry.getId(), entry.getProcessingToken())).isEmpty();
-        Mockito.doCallRealMethod().when(purchaseWaitingOutboxPort).markPublished(any(), any());
+        AtomicBoolean completionFailed = new AtomicBoolean();
+        Mockito.doAnswer(invocation -> {
+            completionFailed.set(true);
+            throw new DataAccessResourceFailureException("publisher database commit failed");
+        }).when(purchaseWaitingOutboxPort).markPublished(any(), any(), any());
         publishReservationOutboxUseCase.publishReady();
+        awaitStatus(entry.getId(), PurchaseWaitingStatus.RESERVED);
+        Awaitility.await().atMost(Duration.ofSeconds(10)).untilTrue(completionFailed);
+        assertThat(purchaseWaitingOutboxPort.findPublishedAt(entry.getId(), entry.getProcessingToken())).isEmpty();
+        assertThat(jdbcTemplate.queryForObject("SELECT claim_id FROM reservation_job_outbox WHERE waiting_entry_id = ?", UUID.class, entry.getId())).isNotNull();
+        Mockito.doCallRealMethod().when(purchaseWaitingOutboxPort).markPublished(any(), any(), any());
+        jdbcTemplate.update("UPDATE reservation_job_outbox SET claim_until = ? WHERE waiting_entry_id = ?", LocalDateTime.now().minusSeconds(1), entry.getId());
+        publishReservationOutboxUseCase.publishReady();
+        Awaitility.await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
+            assertThat(purchaseWaitingOutboxPort.findPublishedAt(entry.getId(), entry.getProcessingToken())).isPresent());
         awaitCommittedOffsets();
-        assertThat(purchaseWaitingOutboxPort.findPublishedAt(entry.getId(), entry.getProcessingToken())).isPresent();
+        assertThat(jdbcTemplate.queryForObject("SELECT publish_attempts FROM reservation_job_outbox WHERE waiting_entry_id = ?", Integer.class, entry.getId())).isEqualTo(2);
         assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM purchases WHERE sale_product_id = ?", Long.class, entry.getSaleProductId())).isEqualTo(1L);
         assertThat(jdbcTemplate.queryForObject("SELECT reserved_quantity FROM inventories WHERE sale_product_id = ?", Long.class, entry.getSaleProductId())).isEqualTo(1L);
     }

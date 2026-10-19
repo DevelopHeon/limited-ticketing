@@ -10,6 +10,8 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.ArgumentMatchers.anyString;
 import com.example.limitedticketing.inventory.domain.model.Inventory;
 import com.example.limitedticketing.inventory.domain.repository.InventoryRepository;
 import com.example.limitedticketing.member.domain.model.Member;
@@ -17,9 +19,13 @@ import com.example.limitedticketing.member.domain.repository.MemberRepository;
 import com.example.limitedticketing.purchasewaiting.application.port.in.worker.PurchaseWaitingReservationPort;
 import com.example.limitedticketing.purchasewaiting.application.port.in.worker.dto.ReservationJobInput;
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingOutboxPort;
+import com.example.limitedticketing.purchasewaiting.application.port.out.ReservationMessagePublisherPort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.dto.ReservationOutboxMessage;
+import com.example.limitedticketing.purchasewaiting.application.port.out.dto.ReservationOutboxClaim;
+import com.example.limitedticketing.purchasewaiting.application.usecase.OutboxTransactionUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.ClaimPurchaseWaitingUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.RecoverPurchaseWaitingUseCase;
+import com.example.limitedticketing.purchasewaiting.application.usecase.PublishReservationOutboxUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.StartPurchaseWaitingExecutionUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.RecordPurchaseWaitingFailureUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ReservationExecutionCommand;
@@ -46,9 +52,11 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.awaitility.Awaitility;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -65,7 +73,9 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -107,6 +117,46 @@ class PurchaseWaitingOutboxIntegrationTest {
     @Autowired private StartPurchaseWaitingExecutionUseCase startPurchaseWaitingExecutionUseCase;
     @Autowired private RecordPurchaseWaitingFailureUseCase recordPurchaseWaitingFailureUseCase;
     @Autowired private ReservationKafkaConsumer reservationKafkaConsumer;
+    @MockitoSpyBean private ReservationMessagePublisherPort reservationMessagePublisherPort;
+    @Autowired private PublishReservationOutboxUseCase publishReservationOutboxUseCase;
+    @Autowired private OutboxTransactionUseCase outboxTransactionUseCase;
+
+    @Test
+    @DisplayName("Kafka 전송은 Claim 커밋 이후 DB 트랜잭션 밖에서 실행한다")
+    void kafkaSendDoesNotHoldTheClaimTransaction() {
+        PurchaseWaitingEntry entry = createWaiting();
+        claimPurchaseWaitingUseCase.claim(new ClaimPurchaseWaitingCommand(entry.getId(), UUID.randomUUID())).orElseThrow();
+        doAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            assertThat(jdbcTemplate.queryForObject("SELECT claim_id FROM reservation_job_outbox WHERE waiting_entry_id = ?", UUID.class, entry.getId())).isNotNull();
+            return CompletableFuture.completedFuture(null);
+        }).when(reservationMessagePublisherPort).publish(anyString(), anyString(), anyString());
+        doAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+            return invocation.callRealMethod();
+        }).when(purchaseWaitingOutboxPort).markPublished(any(), any(), any());
+
+        publishReservationOutboxUseCase.publishReady();
+
+        Awaitility.await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
+            assertThat(jdbcTemplate.queryForObject("SELECT published_at FROM reservation_job_outbox WHERE waiting_entry_id = ?", LocalDateTime.class, entry.getId())).isNotNull());
+    }
+
+    @Test
+    @DisplayName("DB transaction이 열린 진입은 Claim과 Kafka 전송 전에 거부한다")
+    void ambientTransactionIsRejectedBeforeClaimingOrPublishing() {
+        doAnswer(invocation -> CompletableFuture.completedFuture(null))
+            .when(reservationMessagePublisherPort).publish(anyString(), anyString(), anyString());
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            PurchaseWaitingEntry entry = createWaiting();
+            claimPurchaseWaitingUseCase.claim(new ClaimPurchaseWaitingCommand(entry.getId(), UUID.randomUUID())).orElseThrow();
+            assertThatThrownBy(publishReservationOutboxUseCase::publishReady).isInstanceOf(IllegalTransactionStateException.class);
+            verify(reservationMessagePublisherPort, never()).publish(anyString(), anyString(), anyString());
+            assertThat(jdbcTemplate.queryForObject("SELECT claim_id FROM reservation_job_outbox WHERE waiting_entry_id = ?", UUID.class, entry.getId())).isNull();
+            assertThat(jdbcTemplate.queryForObject("SELECT publish_attempts FROM reservation_job_outbox WHERE waiting_entry_id = ?", Integer.class, entry.getId())).isZero();
+            status.setRollbackOnly();
+        });
+    }
 
     @Test
     @DisplayName("실행 실패 기록을 기다리는 동일 메시지는 ACK하지 않고 다시 전달해 예약을 완료한다")
@@ -132,6 +182,74 @@ class PurchaseWaitingOutboxIntegrationTest {
         assertThat(jdbcTemplate.queryForObject("SELECT reserved_quantity FROM inventories WHERE sale_product_id = ?", Long.class, entry.getSaleProductId())).isEqualTo(1L);
     }
 
+
+    @Test
+    @DisplayName("Claim 커밋 후에는 Lease까지 재선택을 막고 만료 후 이전 콜백의 상태 변경을 거부한다")
+    void expiredClaimCanBeRecoveredAndStaleCallbacksAreFenced() {
+        PurchaseWaitingEntry entry = createWaiting();
+        claimPurchaseWaitingUseCase.claim(new ClaimPurchaseWaitingCommand(entry.getId(), UUID.randomUUID())).orElseThrow();
+        LocalDateTime now = LocalDateTime.now().plusSeconds(1);
+        ReservationOutboxMessage original = readyMessage(entry.getId(), now);
+        ReservationOutboxClaim first = claimMessage(original.eventId(), now);
+        assertThat(claimMessages(now.plusSeconds(29))).extracting(claim -> claim.message().eventId()).doesNotContain(original.eventId());
+        assertThat(purchaseWaitingOutboxPort.markPublished(original.eventId(), first.claimId(), now.plusSeconds(30))).isFalse();
+        ReservationOutboxClaim recovered = claimMessage(original.eventId(), now.plusSeconds(30));
+        assertThat(recovered.claimId()).isNotEqualTo(first.claimId());
+        assertThat(recovered.message().payload()).isEqualTo(original.payload());
+        assertThat(recovered.message().attempts()).isEqualTo(2);
+        assertThat(purchaseWaitingOutboxPort.markPublished(original.eventId(), first.claimId(), now.plusSeconds(31))).isFalse();
+        assertThat(purchaseWaitingOutboxPort.recordFailure(original.eventId(), first.claimId(), now.plusSeconds(31), now.plusSeconds(32), "OLD_OWNER")).isFalse();
+        assertThat(purchaseWaitingOutboxPort.markPublished(original.eventId(), recovered.claimId(), now.plusSeconds(31))).isTrue();
+        assertThat(purchaseWaitingOutboxPort.recordFailure(original.eventId(), recovered.claimId(), now.plusSeconds(32), now.plusSeconds(33), "LATE_FAILURE")).isFalse();
+        assertThat(claimMessages(now.plusSeconds(90))).extracting(claim -> claim.message().eventId()).doesNotContain(original.eventId());
+    }
+
+    @Test
+    @DisplayName("동시에 Claim하는 Publisher 중 한 곳만 메시지를 소유한다")
+    void concurrentPublishersCannotClaimTheSameMessage() throws Exception {
+        PurchaseWaitingEntry entry = createWaiting();
+        claimPurchaseWaitingUseCase.claim(new ClaimPurchaseWaitingCommand(entry.getId(), UUID.randomUUID())).orElseThrow();
+        LocalDateTime now = LocalDateTime.now().plusSeconds(1);
+        UUID eventId = readyMessage(entry.getId(), now).eventId();
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executorService = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<List<ReservationOutboxClaim>>> results = new ArrayList<>();
+            for (int index = 0; index < 2; index++) {
+                results.add(executorService.submit(() -> {
+                    if (!start.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Claim start timed out");
+                    }
+                    return claimMessages(now);
+                }));
+            }
+            start.countDown();
+            List<ReservationOutboxClaim> selected = new ArrayList<>();
+            for (Future<List<ReservationOutboxClaim>> result : results) {
+                selected.addAll(result.get(5, TimeUnit.SECONDS));
+            }
+            assertThat(selected.stream().filter(claim -> claim.message().eventId().equals(eventId))).hasSize(1);
+        } finally {
+            executorService.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("Claim은 호출자 transaction이 롤백되어도 별도로 커밋되며 완료는 새 transaction에서 기록한다")
+    void claimAndCompletionHaveIndependentTransactions() {
+        PurchaseWaitingEntry entry = createWaiting();
+        claimPurchaseWaitingUseCase.claim(new ClaimPurchaseWaitingCommand(entry.getId(), UUID.randomUUID())).orElseThrow();
+        UUID eventId = readyMessage(entry.getId(), LocalDateTime.now()).eventId();
+        ReservationOutboxClaim claim = new TransactionTemplate(transactionManager).execute(status -> {
+            ReservationOutboxClaim result = outboxTransactionUseCase.claimReady(100).stream()
+                .filter(candidate -> candidate.message().eventId().equals(eventId)).findFirst().orElseThrow();
+            status.setRollbackOnly();
+            return result;
+        });
+        assertThat(jdbcTemplate.queryForObject("SELECT claim_id FROM reservation_job_outbox WHERE event_id = ?", UUID.class, eventId)).isEqualTo(claim.claimId());
+        assertThat(outboxTransactionUseCase.complete(claim)).isTrue();
+        assertThat(jdbcTemplate.queryForObject("SELECT published_at FROM reservation_job_outbox WHERE event_id = ?", LocalDateTime.class, eventId)).isNotNull();
+    }
 
     @Test
     @DisplayName("입장은 전달 대기 상태와 Outbox를 한 번만 저장하며 실행 lease는 시작하지 않는다")
@@ -170,21 +288,21 @@ class PurchaseWaitingOutboxIntegrationTest {
         assertThat(purchaseWaitingOutboxPort.containsRequest(message.eventId(), entry.getId(), entry.getSaleProductId(), token)).isTrue();
         assertThat(purchaseWaitingOutboxPort.containsRequest(message.eventId(), entry.getId(), entry.getSaleProductId(), UUID.randomUUID())).isFalse();
 
-        purchaseWaitingOutboxPort.recordFailure(message.eventId(), now.plusSeconds(5), "KAFKA_UNAVAILABLE");
+        ReservationOutboxClaim claim = claimMessage(message.eventId(), now);
+        assertThat(purchaseWaitingOutboxPort.recordFailure(message.eventId(), claim.claimId(), now, now.plusSeconds(5), "KAFKA_UNAVAILABLE")).isTrue();
 
-        assertThat(purchaseWaitingOutboxPort.findReadyForUpdate(now, 100))
-            .extracting(ReservationOutboxMessage::eventId).doesNotContain(message.eventId());
-        ReservationOutboxMessage retried = readyMessage(entry.getId(), now.plusSeconds(5));
+        assertThat(claimMessages(now)).extracting(result -> result.message().eventId()).doesNotContain(message.eventId());
+        ReservationOutboxClaim retryClaim = claimMessage(message.eventId(), now.plusSeconds(5));
+        ReservationOutboxMessage retried = retryClaim.message();
         assertThat(retried.eventId()).isEqualTo(message.eventId());
         assertThat(retried.topic()).isEqualTo(message.topic());
         assertThat(retried.key()).isEqualTo(entry.getSaleProductId().toString());
         assertThat(retried.payload()).isEqualTo(message.payload());
-        assertThat(retried.attempts()).isEqualTo(1);
+        assertThat(retried.attempts()).isEqualTo(2);
 
-        purchaseWaitingOutboxPort.markPublished(message.eventId(), now.plusSeconds(6));
+        assertThat(purchaseWaitingOutboxPort.markPublished(message.eventId(), retryClaim.claimId(), now.plusSeconds(6))).isTrue();
         assertThat(purchaseWaitingOutboxPort.findPublishedAt(entry.getId(), token)).contains(now.plusSeconds(6));
-        assertThat(purchaseWaitingOutboxPort.findReadyForUpdate(now.plusSeconds(10), 100))
-            .extracting(ReservationOutboxMessage::eventId).doesNotContain(message.eventId());
+        assertThat(claimMessages(now.plusSeconds(10))).extracting(result -> result.message().eventId()).doesNotContain(message.eventId());
     }
 
     @Test
@@ -211,12 +329,11 @@ class PurchaseWaitingOutboxIntegrationTest {
                 }
             }));
             assertThat(locked.await(5, TimeUnit.SECONDS)).isTrue();
-            List<ReservationOutboxMessage> selected = new TransactionTemplate(transactionManager)
-                .execute(status -> purchaseWaitingOutboxPort.findReadyForUpdate(now, 100));
-            assertThat(selected).extracting(ReservationOutboxMessage::eventId).doesNotContain(eventId);
+            List<ReservationOutboxClaim> selected = claimMessages(now);
+            assertThat(selected).extracting(result -> result.message().eventId()).doesNotContain(eventId);
             release.countDown();
             holding.get(5, TimeUnit.SECONDS);
-            assertThat(readyMessage(entry.getId(), now).eventId()).isEqualTo(eventId);
+            assertThat(claimMessage(eventId, now).message().eventId()).isEqualTo(eventId);
         } finally {
             release.countDown();
             executorService.shutdownNow();
@@ -360,9 +477,17 @@ class PurchaseWaitingOutboxIntegrationTest {
     }
 
     private ReservationOutboxMessage readyMessage(UUID entryId, LocalDateTime now) {
-        UUID eventId = jdbcTemplate.queryForObject("SELECT event_id FROM reservation_job_outbox WHERE waiting_entry_id = ?", UUID.class, entryId);
-        return new TransactionTemplate(transactionManager).execute(status -> purchaseWaitingOutboxPort.findReadyForUpdate(now, 100).stream()
-            .filter(message -> message.eventId().equals(eventId)).findFirst().orElseThrow());
+        return jdbcTemplate.queryForObject("SELECT event_id, topic, message_key, payload, publish_attempts FROM reservation_job_outbox WHERE waiting_entry_id = ?",
+            (rs, row) -> new ReservationOutboxMessage(rs.getObject("event_id", UUID.class), rs.getString("topic"), rs.getString("message_key"), rs.getString("payload"), rs.getInt("publish_attempts")), entryId);
+    }
+
+    private List<ReservationOutboxClaim> claimMessages(LocalDateTime now) {
+        return new TransactionTemplate(transactionManager).execute(status ->
+            purchaseWaitingOutboxPort.claimReady(UUID.randomUUID(), now, now.plusSeconds(30), 100));
+    }
+
+    private ReservationOutboxClaim claimMessage(UUID eventId, LocalDateTime now) {
+        return claimMessages(now).stream().filter(claim -> claim.message().eventId().equals(eventId)).findFirst().orElseThrow();
     }
 
     private PurchaseWaitingEntry createWaiting() {

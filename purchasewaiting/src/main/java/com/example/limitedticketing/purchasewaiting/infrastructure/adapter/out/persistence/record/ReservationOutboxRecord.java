@@ -13,6 +13,7 @@ public record ReservationOutboxRecord(
     String messageKey,
     String payload,
     LocalDateTime createdAt,
-    int publishAttempts
+    int publishAttempts,
+    UUID claimId
 ) {
 }

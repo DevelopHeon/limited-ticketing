@@ -36,8 +36,11 @@ flowchart LR
     dispatch --> outbox["Outbox Output Port<br/>Adapter / JdbcRepository"]
     admission --> store
     publisher["Publisher Scheduler / PortService"] --> publish["발행 UseCase / Service"]
-    publish --> outbox
+    publish --> tx["Outbox transaction UseCase / Service<br/>Claim 커밋 · Complete · Failure"]
+    tx --> outbox
     publish --> kafkaAdapter["발행 Output Port / Kafka Adapter"]
+    kafkaAdapter -->|"Future 완료"| callback["제한된 콜백 Executor"]
+    callback --> tx
     kafkaAdapter --> kafka[("Kafka")]
     kafka --> consumer["Consumer Input Adapter"]
     consumer --> execution["Reservation Port / Facade<br/>시작·실행·실패 복원 UseCase"]
@@ -61,12 +64,24 @@ Controller·Scheduler·Consumer는 입력 Adapter다. Application의 Facade가 �
 1. 기존 요청 키는 원장을 반환한다. 상품별 DB 잠금 아래 속도·수용량을 확인하고 순번과 WAITING을 저장한다. 커밋 후 Redis에 등록한다.
 2. Dispatcher는 Redis에서 앞 순번을 claim한다. DB의 전역 → 상품 잠금 순서로 `DISPATCHED + PROCESSING` 상한을 확인한다. 기본 전역·상품별 상한은 각각 10이며 여러 Dispatcher가 공유한다. 각 실행의 상한 설정을 동일하게 유지한다.
 3. WAITING→DISPATCHED와 예약 Outbox를 같은 transaction으로 커밋한다. 전달 대기에는 실행 lease를 시작하지 않는다. DB 입장이 거절되면 같은 token으로 Redis를 반환한다.
-4. Publisher는 미발행 Outbox를 `FOR UPDATE SKIP LOCKED`로 최대 10개 읽는다. Kafka ACK 후 발행 완료를 저장한다. 실패는 1·2·4·8·16·30초 상한의 backoff로 남긴다. ACK 뒤 DB 커밋 실패는 동일 eventId의 중복 발행을 허용한다.
+4. Publisher는 In-flight 용량을 먼저 확보하고 미발행 Outbox를 `FOR UPDATE SKIP LOCKED`로 Claim한다. Claim ID·30초 Lease·발행 시도를 짧은 transaction에서 커밋한 뒤 Kafka Future를 등록한다. ACK·실패의 DB 기록은 제한된 콜백 Executor와 별도 transaction으로 처리한다. 실패는 실제 처리 시각부터 1·2·4·8·16·30초 상한의 backoff를 적용한다. ACK 뒤 DB 기록 실패는 Lease 만료 후 동일 eventId의 중복 발행을 허용한다.
 5. Consumer는 JSON version·필드·key와 원장의 event/token을 확인한다. 짧은 시작 transaction에서 실행 횟수와 30초 lease를 커밋한다. 별도 실행 transaction에서 행 잠금·token·lease를 확인하고 `purchase`의 예약 Input Port를 호출한다. 구매 예약은 기존 `REQUIRES_NEW` transaction을 사용한다.
-6. 결과 원장 커밋 후 offset을 저장한다. RESERVED·SOLD_OUT·업무 FAILED·이전 token·완료 중복은 재예약하지 않는다. Redis 슬롯 반환 실패는 원장의 예약을 재실행시키지 않으며 복구가 정리한다.
+6. 결과 원장 커밋 후 offset을 저장한다. RESERVED·SOLD_OUT·업무 FAILED·이전 token·완료 중복은 재예약하지 않는다. 현재 token의 PROCESSING 중복은 BUSY로 구분해 ACK 대신 nack한다. 첫 실행의 실패 기록보다 중복 ACK가 앞서 재시도를 유실시키는 것을 막는다. Redis 슬롯 반환 실패는 원장의 예약을 재실행시키지 않으며 복구가 정리한다.
 7. 기술 오류는 같은 업무 키로 최초 포함 총 3회 실행한다. 횟수는 롤백·재시작에도 유지한다. 소진 시 기존 구매를 조회해 RESERVED를 복원하거나, 구매가 없다고 확인되면 FAILED와 DLT 알림 Outbox를 함께 저장한다.
 
 로컬 Executor 직접 제출과 Broker 장애 시 직접 실행 fallback은 없다. Kafka 메시지는 eventId·version·시간·대기 ID·상품 ID·token 중심 JSON이며 가격·재고를 복제하지 않는다. `saleProductId`가 key이며 같은 상품은 한 partition으로 전달된다. topic은 각각 6 partitions, 로컬 RF3·minISR2다. 전체 계약은 [3단계 스펙](../plans/2026-10-19-stage-3-kafka-outbox.md), 결정 이유는 [ADR 0010](../adr/0010-kafka-reservation-outbox.md)을 따른다.
+
+## Outbox 비동기 발행 경계
+
+`PublishReservationOutboxService`는 내부 UseCase의 기술 발행 흐름을 조율한다. `NEVER`로 이미 열린 transaction의 호출을 Claim·전송 전에 거부한다. 이를 통해 호출자가 보유한 DB 연결·잠금이 전송 대기 동안 남는 것을 방지한다. `OutboxTransactionUseCase`의 구현인 `OutboxTransactionService`가 Claim·Complete·Failure를 각각 `REQUIRES_NEW`, timeout 5초로 실행한다. 이 시간은 DB transaction 제한이며 Hikari 연결 획득 대기나 전체 발행 완료 시간의 상한은 아니다.
+
+인스턴스별 Semaphore 기본 10개와 batch 10개를 사용한다. Claim 전에 확보하고, 실제 Claim이 적으면 남는 용량을 반환한다. Kafka ACK 대기·콜백 대기·DB 결과 기록까지 Permit을 점유한다. DB Claim 실패·콜백 실행 거부·결과 저장 오류에서도 Permit을 반환한다.
+
+`ReservationMessagePublisherPort`는 `CompletableFuture<Void>`를 반환한다. Kafka Adapter는 `KafkaTemplate.send()`의 Future를 연결하며 `get`·`join`·`@Async`·`runAsync`를 사용하지 않는다. 전송 호출 자체는 metadata·buffer 확보 때문에 `max.block.ms=5000`까지 기다릴 수 있지만 DB transaction과 행 잠금은 보유하지 않는다. ACK 전달에는 `delivery.timeout.ms=5000`이 적용된다. [Spring Kafka 전송 계약](https://docs.spring.io/spring-kafka/reference/kafka/sending-messages.html)을 따른다.
+
+Kafka 완료 콜백에서는 DB를 직접 호출하지 않고 전용 Executor에 넘긴다. 기본 2개 스레드·대기 큐 10개·AbortPolicy를 사용한다. 포화·종료로 실행이 거부되거나 DB 기록이 실패하면 Claim을 그대로 두고 Lease 만료 후 재선택한다. 완료·실패 UPDATE는 미발행·동일 claimId·미만료 Lease를 모두 확인한다. 이전 콜백은 새 소유자나 완료 상태를 덮어쓰지 못한다.
+
+`publish_attempts`는 Claim 시 증가해 전송 전 프로세스 종료도 시도로 남긴다. 예약의 `execution_attempts` 3회 예산과 다르다. Lease는 중복 전송을 막는 절대 시간 보장이 아니다. 지연된 전송·콜백은 Lease 이후 중복될 수 있고 Consumer의 업무 멱등성으로 보호한다. 여러 Publisher·재발행의 엄격한 전송 FIFO는 보장하지 않는다. 선택 이유와 감수한 비용은 [ADR 0011](../adr/0011-asynchronous-outbox-claim-lease.md)을 따른다.
 
 ## 복구
 
@@ -84,6 +99,8 @@ Controller·Scheduler·Consumer는 입력 Adapter다. Application의 Facade가 �
 ## 적용과 검증
 
 V7 적용 전 이전 Worker를 중지한다. 기존 PROCESSING의 token·lease를 보존하고 실행 횟수를 1로 초기화한다. 이미 적용된 V1–V6 migration은 변경하지 않는다. 혼합 버전 Worker를 동시에 실행하지 않는다.
+
+비동기 Publisher는 V8의 `claim_id`·`claim_until`을 사용한다. V7 파일을 수정하지 않고 V8을 추가한다. 전환 시 동기 Publisher를 사용하는 이전 Worker를 모두 중지한 뒤 migration과 새 Worker를 실행한다. 이전 Publisher는 새 Claim을 이해하지 못하므로 혼합 실행하지 않는다. 미발행 Outbox와 eventId·payload는 그대로 유지한다.
 
 기본 Hikari 풀은 30이며 Kafka Consumer concurrency는 프로세스당 3이다. 예약의 내부 transaction에 추가 연결이 필요하므로 실제 Consumer 수·HTTP·복구·Publisher를 고려해 연결 여유를 둔다. DB 자동 failover와 다중 앱 처리량 평가는 별도 범위다. 검증 책임은 [테스트 기준](../development/testing.md), 실제 실험 조건·한계는 [평가 기록](../README.md)을 따른다.
 

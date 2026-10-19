@@ -33,6 +33,12 @@ limited-ticketing:
     min-in-sync-replicas: 2
     publisher-fixed-delay: 100
     publisher-initial-delay: 1000
+    outbox:
+      max-in-flight: 10
+      batch-size: 10
+      claim-lease-seconds: 30
+      callback-threads: 2
+      callback-queue-capacity: 10
   queue:
     admission:
       max-outstanding: ${QUEUE_MAX_OUTSTANDING:10000}

@@ -56,7 +56,7 @@ Flyway가 시작 시 [DB migration](../../app/src/main/resources/db/migration)�
 | `QUEUE_RECOVERY_BATCH_SIZE` | 1000 | Recovery의 DB keyset 및 존재 확인 배치 크기 |
 | `QUEUE_PROCESSING_TIMEOUT_SECONDS` | 30 | 처리 시작 권한의 lease, 실행 중 잠긴 행은 회수하지 않음 |
 
-Consumer의 외부 결과 transaction과 내부 예약 transaction은 연결을 각각 사용한다. 기본 Consumer concurrency는 3이며 Hikari 풀은 30이다. 여러 Worker를 실행하면 모든 Consumer·HTTP·Publisher·복구 작업의 연결 여유를 함께 계산한다. V7 적용 전 이전 Worker를 중지하고 새 버전만 실행한다.
+Consumer의 외부 결과 transaction과 내부 예약 transaction은 연결을 각각 사용한다. 기본 Consumer concurrency는 3이며 Hikari 풀은 30이다. 여러 Worker를 실행하면 모든 Consumer·HTTP·Publisher·복구 작업의 연결 여유를 함께 계산한다. V7·V8 적용 전 이전 Worker를 중지하고 새 버전만 실행한다. 특히 V7 동기 Publisher와 V8 Claim/Lease Publisher를 혼합 실행하지 않는다.
 
 ### API와 Worker 역할 분리
 
@@ -78,6 +78,10 @@ API 기본 포트는 8081, Worker는 8082(`WORKER_PORT`)다. API는 업무 HTTP�
 Kafka는 combined KRaft 3개 노드·고정 image digest·RF3·minISR2를 사용한다. 각 노드는 CPU 0.75·메모리 768MiB·JVM heap 384MiB다. reservation과 DLT topic은 각각 6 partitions다. `KAFKA_BOOTSTRAP_SERVERS`로 호스트 연결을 변경할 수 있다. 이 로컬 PLAINTEXT 구성은 운영 인증 구성이 아니다.
 
 ### Kafka 관찰과 복구
+
+Outbox 발행은 짧은 Claim commit → Kafka Future → 별도 완료/실패 commit 순서다. 기본 In-flight 10·batch 10·Claim Lease 30초·DB 콜백 스레드 2·대기 큐 10이며 `limited-ticketing.kafka.outbox`에서 조정한다. 이 값은 인스턴스별 용량이며 DB 입장 cap이나 Kafka Producer의 연결별 `max.in.flight` 설정과 다르다. [발행 경계](../architecture/purchase-waiting.md#outbox-비동기-발행-경계)를 확인한다.
+
+`Outbox callback rejected`·`Outbox completion failed`는 Permit을 반환하고 미발행 Claim을 남긴다. Executor·DB 상태를 복구하면 Lease가 지난 행을 polling이 다시 선택한다. ACK를 이미 받았어도 재발행할 수 있으므로 SQL로 PUBLISHED를 강제로 표시하지 않는다. `Outbox callback lost claim ownership`는 만료·새 Claim·완료 이후의 오래된 콜백일 수 있다. eventId와 claim_id·claim_until·published_at을 함께 확인한다. 발행 시도는 Claim 시 증가하며 예약 실행 예산과 구분한다.
 
 ```bash
 docker compose --profile kafka exec -T kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:9092 --describe --topic limited-ticketing.purchasewaiting.reservation.v1

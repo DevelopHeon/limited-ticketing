@@ -25,9 +25,9 @@
 
 `PurchaseWaitingProtectionIntegrationTest`는 동시 수용량·동시 멱등 재전송·1초 속도 제한·Redis 장애 전후·기본 직접 HTTP 차단을 검증한다. 기존 직접 예약 HTTP·결제 통합 테스트는 `test,baseline`으로 기존 예약 계약을 검증한다. 기존 Executor 전용 검증은 Kafka 전달 대기를 포함하는 DB 입장 상한·입장 거부 후 Redis 반환 검증으로 교체했다.
 
-`PurchaseWaitingOutboxIntegrationTest`는 실제 PostgreSQL/Redis에서 입장+Outbox 원자성, 재시도 시각과 payload 보존, SKIP LOCKED, 관리자 인증·동시 재처리·이전 token·실행 예산 소진 복구를 검증한다.
+`PurchaseWaitingOutboxIntegrationTest`는 실제 PostgreSQL/Redis에서 입장+Outbox 원자성, 재시도 시각과 payload 보존, 동시 Claim·SKIP LOCKED·Lease 재선택·이전 콜백 차단, 열린 transaction 진입 거부·Kafka 전송의 transaction 비보유·독립 Claim/완료 commit, 관리자 인증·동시 재처리·이전 token·실행 예산 소진 복구를 검증한다.
 
-`PurchaseWaitingKafkaIntegrationTest`는 실제 PostgreSQL/Redis/Kafka로 HTTP→Outbox→Consumer→예약, 중복 소비, ACK 후 DB 롤백의 재발행, poison DLT, 총 3회 기술 실패·기존 구매 복원, DB 확인/DLT 발행 실패 시 정지·offset 유지·복구를 검증한다. 실패 경계는 Spy로 주입하지만 실제 Kafka 전송과 group offset을 검사한다. 테스트 Kafka는 RF1·minISR1이므로 복제 내결함성을 검증한 것으로 표현하지 않는다. 로컬 RF3·minISR2 Broker 장애는 별도 실험으로 확인한다. 일반 업무 통합 테스트에서는 listener와 polling을 멈추고 Port를 통해 실행 경계를 명시적으로 구동하며, 실제 Kafka 연결 검증과 구분한다.
+`PurchaseWaitingKafkaIntegrationTest`는 실제 PostgreSQL/Redis/Kafka로 HTTP→Outbox→Consumer→예약, 중복 소비, ACK 후 완료 저장 실패와 Lease 만료 후 재발행, poison DLT, 총 3회 기술 실패·기존 구매 복원, DB 확인/DLT 발행 실패 시 정지·offset 유지·복구를 검증한다. 실패 경계는 Spy로 주입하지만 실제 Kafka 전송과 group offset을 검사한다. 테스트 Kafka는 RF1·minISR1이므로 복제 내결함성을 검증한 것으로 표현하지 않는다. 로컬 RF3·minISR2 Broker 장애는 별도 실험으로 확인한다. 일반 업무 통합 테스트에서는 listener와 polling을 멈추고 Port를 통해 실행 경계를 명시적으로 구동하며, 실제 Kafka 연결 검증과 구분한다.
 
 `ModularityDocumentationTests`는 Spring Modulith `Documenter`로 코드 기준의 모듈 문서를 생성한다.
 
@@ -81,3 +81,5 @@ Input Port를 구현하는 PortService의 의존은 허용하지만, 내부 업�
 접수 Facade에 전체 transaction을 추가하지 않는다. `PurchaseWaitingIntegrationTest.queuesRequestsIdempotentlyAndProcessesOnlyTheInventoryWinner`는 접수 응답에 Redis 등록 이후 순번 1·2가 포함되고 멱등 재전송 및 최종 예약·품절이 재고와 일치하는지 검증한다. Aggregate Repository와 Port를 옮겨도 기존 상태·수량·오류·부수효과 assert는 유지한다.
 
 InventoryCommandServiceTest는 0 이하 예약 수량의 영속화 차단, 존재하지 않는 원장과 실제 품절의 오류 구분, 중복 초기화 시 수량 덮어쓰기 금지를 검증한다. 예약·결제·취소·만료의 실제 롤백과 동시성은 app 통합 테스트가 검증한다. 위임 횟수·DTO 접근자·클래스 존재만 확인하는 테스트는 늘리지 않는다.
+
+비동기 Outbox 단위 테스트는 미완료 Future·완료 콜백 대기까지의 In-flight 제한, 동시 polling, 동기/비동기 전송 실패, Claim 오류, 콜백 실행 거부, DB 완료/실패 기록 오류에서의 Permit 반환을 검증한다. 가변 Clock으로 지연 실패 후 backoff와 30초 상한을 유지하는지도 검사한다.

@@ -3,9 +3,7 @@ package com.example.limitedticketing.purchasewaiting.infrastructure.adapter.out.
 import com.example.limitedticketing.purchasewaiting.application.port.out.ReservationMessagePublisherPort;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.CompletableFuture;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
@@ -22,17 +20,18 @@ public class KafkaReservationMessagePublisher implements ReservationMessagePubli
     }
 
     @Override
-    public void publish(String topic, String key, String payload) {
+    public CompletableFuture<Void> publish(String topic, String key, String payload) {
         try {
-            kafkaTemplate.send(topic, key, payload).get(6, TimeUnit.SECONDS);
-            acknowledgedCounter.increment();
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
+            return kafkaTemplate.send(topic, key, payload)
+                .thenAccept(result -> acknowledgedCounter.increment())
+                .whenComplete((ignored, failure) -> {
+                    if (failure != null) {
+                        failedCounter.increment();
+                    }
+                });
+        } catch (RuntimeException exception) {
             failedCounter.increment();
-            throw new IllegalStateException("Reservation publish interrupted", exception);
-        } catch (ExecutionException | TimeoutException | RuntimeException exception) {
-            failedCounter.increment();
-            throw new IllegalStateException("Reservation publish was not acknowledged", exception);
+            return CompletableFuture.failedFuture(exception);
         }
     }
 }

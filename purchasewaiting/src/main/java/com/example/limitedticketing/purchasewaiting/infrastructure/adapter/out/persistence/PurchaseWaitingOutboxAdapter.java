@@ -3,6 +3,7 @@ package com.example.limitedticketing.purchasewaiting.infrastructure.adapter.out.
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingOutboxPort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.dto.ReservationJobEvent;
 import com.example.limitedticketing.purchasewaiting.application.port.out.dto.ReservationOutboxMessage;
+import com.example.limitedticketing.purchasewaiting.application.port.out.dto.ReservationOutboxClaim;
 import com.example.limitedticketing.purchasewaiting.infrastructure.adapter.out.persistence.record.ReservationOutboxRecord;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -45,7 +46,7 @@ public class PurchaseWaitingOutboxAdapter implements PurchaseWaitingOutboxPort {
         String topic = ReservationJobEvent.REQUESTED.equals(event.eventType()) ? reservationTopic : deadLetterTopic;
         purchaseWaitingOutboxJdbcRepository.insertIfAbsent(new ReservationOutboxRecord(
             event.eventId(), event.waitingEntryId(), event.saleProductId(), event.processingToken(), event.eventType(),
-            topic, event.saleProductId().toString(), payload, createdAt, 0));
+            topic, event.saleProductId().toString(), payload, createdAt, 0, null));
     }
 
     @Override
@@ -59,21 +60,21 @@ public class PurchaseWaitingOutboxAdapter implements PurchaseWaitingOutboxPort {
     }
 
     @Override
-    public List<ReservationOutboxMessage> findReadyForUpdate(LocalDateTime now, int limit) {
-        return purchaseWaitingOutboxJdbcRepository.findReadyForUpdate(now, limit).stream()
-            .map(record -> new ReservationOutboxMessage(record.eventId(), record.topic(), record.messageKey(),
-                record.payload(), record.publishAttempts()))
+    public List<ReservationOutboxClaim> claimReady(UUID claimId, LocalDateTime now, LocalDateTime claimUntil, int limit) {
+        return purchaseWaitingOutboxJdbcRepository.claimReady(claimId, now, claimUntil, limit).stream()
+            .map(record -> new ReservationOutboxClaim(new ReservationOutboxMessage(record.eventId(), record.topic(), record.messageKey(),
+                record.payload(), record.publishAttempts()), record.claimId()))
             .toList();
     }
 
     @Override
-    public void markPublished(UUID eventId, LocalDateTime now) {
-        purchaseWaitingOutboxJdbcRepository.markPublished(eventId, now);
+    public boolean markPublished(UUID eventId, UUID claimId, LocalDateTime now) {
+        return purchaseWaitingOutboxJdbcRepository.markPublished(eventId, claimId, now);
     }
 
     @Override
-    public void recordFailure(UUID eventId, LocalDateTime nextAttempt, String failureCode) {
-        purchaseWaitingOutboxJdbcRepository.recordFailure(eventId, nextAttempt, failureCode);
+    public boolean recordFailure(UUID eventId, UUID claimId, LocalDateTime now, LocalDateTime nextAttempt, String failureCode) {
+        return purchaseWaitingOutboxJdbcRepository.recordFailure(eventId, claimId, now, nextAttempt, failureCode);
     }
 
 }

@@ -28,7 +28,7 @@ Aggregate 영속성은 Domain Repository를 유지한다. 기술 전달 기록�
 - 전달 보장은 at-least-once다. ACK 후 DB 반영 전 장애에서는 같은 eventId가 재발행될 수 있다.
 - 상품별 key는 같은 상품을 한 partition에 모으므로 단일 인기 상품이 모든 partition의 처리량을 사용하지 못한다. 입장 순서와 병렬 완료 순서도 구분한다.
 - 로컬 3 combined KRaft 노드·RF3·minISR2는 복제 학습 구성이다. 1 Broker 장애와 2 Broker 장애의 가용성 차이를 확인한다. 운영 배포 인증이나 전용 Controller 구성을 대신하지 않는다.
-- Outbox polling과 잠금 중 유한한 Kafka 전송 대기는 DB 연결을 사용한다. 무한 재시도·자동 poison 재입장은 피하고, 관리자 재처리 시 중복 구매와 이전 token을 검사한다.
+- 최초 구현의 Outbox polling과 잠금 중 유한한 Kafka 전송 대기는 DB 연결을 사용했다. 이 발행 경계는 후속 [ADR 0011](0011-asynchronous-outbox-claim-lease.md)에서 Claim/Lease와 비동기 전송·완료 transaction으로 대체한다. 무한 재시도·자동 poison 재입장은 피하고, 관리자 재처리 시 중복 구매와 이전 token을 검사한다.
 - 같은 산출물의 API/Worker 역할 분리는 코드 모듈을 독립 서비스로 분리하는 결정이 아니다. 같은 DB와 공개 모듈 계약을 유지한다.
 
 ## 근거

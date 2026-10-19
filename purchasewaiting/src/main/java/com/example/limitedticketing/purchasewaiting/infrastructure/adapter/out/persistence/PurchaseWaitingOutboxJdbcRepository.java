@@ -45,25 +45,39 @@ public class PurchaseWaitingOutboxJdbcRepository {
             entryId, token, REQUESTED_EVENT_TYPE).stream().findFirst();
     }
 
-    public List<ReservationOutboxRecord> findReadyForUpdate(LocalDateTime now, int limit) {
+    public List<ReservationOutboxRecord> claimReady(UUID claimId, LocalDateTime now, LocalDateTime claimUntil, int limit) {
         return jdbcTemplate.query("""
-            SELECT event_id, waiting_entry_id, sale_product_id, processing_token, event_type,
-                   topic, message_key, payload, created_at, publish_attempts FROM reservation_job_outbox
-            WHERE published_at IS NULL AND next_attempt_at <= ?
-            ORDER BY created_at, event_id LIMIT ? FOR UPDATE SKIP LOCKED
+            WITH candidates AS (
+                SELECT event_id FROM reservation_job_outbox
+                WHERE published_at IS NULL AND next_attempt_at <= ?
+                    AND (claim_until IS NULL OR claim_until <= ?)
+                ORDER BY created_at, event_id LIMIT ? FOR UPDATE SKIP LOCKED
+            ), claimed AS (
+                UPDATE reservation_job_outbox AS outbox
+                SET claim_id = ?, claim_until = ?, publish_attempts = publish_attempts + 1
+                FROM candidates WHERE outbox.event_id = candidates.event_id
+                RETURNING outbox.*
+            )
+            SELECT * FROM claimed ORDER BY created_at, event_id
             """, (rs, row) -> new ReservationOutboxRecord(rs.getObject("event_id", UUID.class),
             rs.getObject("waiting_entry_id", UUID.class), rs.getLong("sale_product_id"),
             rs.getObject("processing_token", UUID.class), rs.getString("event_type"),
             rs.getString("topic"), rs.getString("message_key"), rs.getString("payload"),
-            rs.getObject("created_at", LocalDateTime.class), rs.getInt("publish_attempts")), now, limit);
+            rs.getObject("created_at", LocalDateTime.class), rs.getInt("publish_attempts"), rs.getObject("claim_id", UUID.class)), now, now, limit, claimId, claimUntil);
     }
 
-    public void markPublished(UUID eventId, LocalDateTime now) {
-        jdbcTemplate.update("UPDATE reservation_job_outbox SET published_at = ?, publish_attempts = publish_attempts + 1, failure_code = NULL WHERE event_id = ?", now, eventId);
+    public boolean markPublished(UUID eventId, UUID claimId, LocalDateTime now) {
+        return jdbcTemplate.update("""
+            UPDATE reservation_job_outbox SET published_at = ?, claim_id = NULL, claim_until = NULL, failure_code = NULL
+            WHERE event_id = ? AND claim_id = ? AND claim_until > ? AND published_at IS NULL
+            """, now, eventId, claimId, now) == 1;
     }
 
-    public void recordFailure(UUID eventId, LocalDateTime nextAttempt, String failureCode) {
-        jdbcTemplate.update("UPDATE reservation_job_outbox SET publish_attempts = publish_attempts + 1, next_attempt_at = ?, failure_code = ? WHERE event_id = ?", nextAttempt, failureCode, eventId);
+    public boolean recordFailure(UUID eventId, UUID claimId, LocalDateTime now, LocalDateTime nextAttempt, String failureCode) {
+        return jdbcTemplate.update("""
+            UPDATE reservation_job_outbox SET next_attempt_at = ?, failure_code = ?, claim_id = NULL, claim_until = NULL
+            WHERE event_id = ? AND claim_id = ? AND claim_until > ? AND published_at IS NULL
+            """, nextAttempt, failureCode, eventId, claimId, now) == 1;
     }
 
     public long countPending() {

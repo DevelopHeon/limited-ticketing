@@ -148,6 +148,8 @@ Redis 대기열 테스트 데이터 생성부터 Smoke/Load 실행, Redis 관찰
 
 테스트 책임과 검사 명령은 [테스트 기준](testing.md)에서 관리한다.
 
+현재 ZSET·Kafka의 동작을 작은 데이터로 학습하려면 [질문별 답변과 수동 실험](zset-kafka-study.md)을 따른다. 기존 fixture SQL·Redis/Kafka 확인 명령·중복과 복구의 기대값을 포함하며 성능 평가와 구분한다.
+
 ## 관측과 자동 기준선
 
 Actuator의 health는 상세 내부 정보 없이 공개하고, prometheus는 local/test 관리자에게만 제공한다. 다른 Actuator 경로는 차단한다. 기존 앱·DB·Redis와 같은 Compose project의 `observability` profile을 사용한다.

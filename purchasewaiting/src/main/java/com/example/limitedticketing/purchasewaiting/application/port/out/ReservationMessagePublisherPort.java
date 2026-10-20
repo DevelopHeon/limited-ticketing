@@ -1,7 +1,8 @@
 package com.example.limitedticketing.purchasewaiting.application.port.out;
 
+import com.example.limitedticketing.purchasewaiting.application.port.out.dto.ReservationOutboxMessage;
 import java.util.concurrent.CompletableFuture;
 
 public interface ReservationMessagePublisherPort {
-    CompletableFuture<Void> publish(String topic, String key, String payload);
+    CompletableFuture<Void> publish(ReservationOutboxMessage message);
 }

@@ -1,6 +1,7 @@
 package com.example.limitedticketing.purchasewaiting.infrastructure.adapter.out.messaging;
 
 import com.example.limitedticketing.purchasewaiting.application.port.out.ReservationMessagePublisherPort;
+import com.example.limitedticketing.purchasewaiting.application.port.out.dto.ReservationOutboxMessage;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.concurrent.CompletableFuture;
@@ -20,9 +21,9 @@ public class KafkaReservationMessagePublisher implements ReservationMessagePubli
     }
 
     @Override
-    public CompletableFuture<Void> publish(String topic, String key, String payload) {
+    public CompletableFuture<Void> publish(ReservationOutboxMessage message) {
         try {
-            return kafkaTemplate.send(topic, key, payload)
+            return kafkaTemplate.send(message.topic(), message.key(), message.payload())
                 .thenAccept(result -> acknowledgedCounter.increment())
                 .whenComplete((ignored, failure) -> {
                     if (failure != null) {

@@ -77,7 +77,7 @@ Controller·Scheduler·Consumer는 입력 Adapter다. Application의 Facade가 �
 
 인스턴스별 Semaphore 기본 10개와 batch 10개를 사용한다. Claim 전에 확보하고, 실제 Claim이 적으면 남는 용량을 반환한다. Kafka ACK 대기·콜백 대기·DB 결과 기록까지 Permit을 점유한다. DB Claim 실패·콜백 실행 거부·결과 저장 오류에서도 Permit을 반환한다.
 
-`ReservationMessagePublisherPort`는 `CompletableFuture<Void>`를 반환한다. Kafka Adapter는 `KafkaTemplate.send()`의 Future를 연결하며 `get`·`join`·`@Async`·`runAsync`를 사용하지 않는다. 전송 호출 자체는 metadata·buffer 확보 때문에 `max.block.ms=5000`까지 기다릴 수 있지만 DB transaction과 행 잠금은 보유하지 않는다. ACK 전달에는 `delivery.timeout.ms=5000`이 적용된다. [Spring Kafka 전송 계약](https://docs.spring.io/spring-kafka/reference/kafka/sending-messages.html)을 따른다.
+`ReservationMessagePublisherPort.publish(ReservationOutboxMessage)`는 기존 Outbox 메시지 DTO를 받고 `CompletableFuture<Void>`를 반환한다. DTO의 topic·key·저장된 JSON payload를 Kafka Adapter가 그대로 전달하므로 발행 시 메시지를 다시 파싱하거나 직렬화하지 않는다. Consumer는 기존 문자열 수신·계약 검증을 유지한다. Kafka Adapter는 `KafkaTemplate.send()`의 Future를 연결하며 `get`·`join`·`@Async`·`runAsync`를 사용하지 않는다. 전송 호출 자체는 metadata·buffer 확보 때문에 `max.block.ms=5000`까지 기다릴 수 있지만 DB transaction과 행 잠금은 보유하지 않는다. ACK 전달에는 `delivery.timeout.ms=5000`이 적용된다. [Spring Kafka 전송 계약](https://docs.spring.io/spring-kafka/reference/kafka/sending-messages.html)을 따른다.
 
 Kafka 완료 콜백에서는 DB를 직접 호출하지 않고 전용 Executor에 넘긴다. 기본 2개 스레드·대기 큐 10개·AbortPolicy를 사용한다. 포화·종료로 실행이 거부되거나 DB 기록이 실패하면 Claim을 그대로 두고 Lease 만료 후 재선택한다. 완료·실패 UPDATE는 미발행·동일 claimId·미만료 Lease를 모두 확인한다. 이전 콜백은 새 소유자나 완료 상태를 덮어쓰지 못한다.
 

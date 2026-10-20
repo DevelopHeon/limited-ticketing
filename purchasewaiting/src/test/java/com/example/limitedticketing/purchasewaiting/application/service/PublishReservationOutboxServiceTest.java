@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -44,20 +43,20 @@ class PublishReservationOutboxServiceTest {
         ReservationOutboxClaim first = claim();
         CompletableFuture<Void> firstAck = new CompletableFuture<>();
         when(outboxTransactionUseCase.claimReady(anyInt())).thenReturn(List.of(first, claim()), List.of(claim()));
-        when(reservationMessagePublisherPort.publish(anyString(), anyString(), anyString()))
+        when(reservationMessagePublisherPort.publish(any(ReservationOutboxMessage.class)))
             .thenReturn(firstAck, new CompletableFuture<>(), new CompletableFuture<>());
         PublishReservationOutboxService service = service(callbacks::add, 2);
         service.publishReady();
         service.publishReady();
-        verify(reservationMessagePublisherPort, times(2)).publish(anyString(), anyString(), anyString());
+        verify(reservationMessagePublisherPort, times(2)).publish(any(ReservationOutboxMessage.class));
         firstAck.complete(null);
         service.publishReady();
-        verify(reservationMessagePublisherPort, times(2)).publish(anyString(), anyString(), anyString());
+        verify(reservationMessagePublisherPort, times(2)).publish(any(ReservationOutboxMessage.class));
         callbacks.remove().run();
         service.publishReady();
         verify(outboxTransactionUseCase).complete(first);
         verify(outboxTransactionUseCase).claimReady(1);
-        verify(reservationMessagePublisherPort, times(3)).publish(anyString(), anyString(), anyString());
+        verify(reservationMessagePublisherPort, times(3)).publish(any(ReservationOutboxMessage.class));
     }
 
     @ParameterizedTest
@@ -68,10 +67,10 @@ class PublishReservationOutboxServiceTest {
         IllegalStateException failure = new IllegalStateException("broker unavailable");
         when(outboxTransactionUseCase.claimReady(1)).thenReturn(List.of(first), List.of(claim()));
         if (synchronous) {
-            when(reservationMessagePublisherPort.publish(anyString(), anyString(), anyString()))
+            when(reservationMessagePublisherPort.publish(any(ReservationOutboxMessage.class)))
                 .thenThrow(failure).thenReturn(new CompletableFuture<>());
         } else {
-            when(reservationMessagePublisherPort.publish(anyString(), anyString(), anyString()))
+            when(reservationMessagePublisherPort.publish(any(ReservationOutboxMessage.class)))
                 .thenReturn(CompletableFuture.failedFuture(failure), new CompletableFuture<>());
         }
         PublishReservationOutboxService service = service(callbacks::add, 1);
@@ -79,18 +78,18 @@ class PublishReservationOutboxServiceTest {
         callbacks.remove().run();
         service.publishReady();
         verify(outboxTransactionUseCase).recordFailure(first, failure);
-        verify(reservationMessagePublisherPort, times(2)).publish(anyString(), anyString(), anyString());
+        verify(reservationMessagePublisherPort, times(2)).publish(any(ReservationOutboxMessage.class));
     }
 
     @Test
     @DisplayName("콜백 Executor가 실행을 거부해도 Permit을 반환해 다른 발행을 막지 않는다")
     void rejectedCallbackDoesNotLeakCapacity() {
         when(outboxTransactionUseCase.claimReady(1)).thenReturn(List.of(claim()), List.of(claim()));
-        when(reservationMessagePublisherPort.publish(anyString(), anyString(), anyString())).thenReturn(CompletableFuture.completedFuture(null));
+        when(reservationMessagePublisherPort.publish(any(ReservationOutboxMessage.class))).thenReturn(CompletableFuture.completedFuture(null));
         PublishReservationOutboxService service = service(task -> { throw new RejectedExecutionException("queue full"); }, 1);
         service.publishReady();
         service.publishReady();
-        verify(reservationMessagePublisherPort, times(2)).publish(anyString(), anyString(), anyString());
+        verify(reservationMessagePublisherPort, times(2)).publish(any(ReservationOutboxMessage.class));
     }
 
     @ParameterizedTest
@@ -100,41 +99,41 @@ class PublishReservationOutboxServiceTest {
         when(outboxTransactionUseCase.claimReady(1)).thenReturn(List.of(claim()), List.of(claim()));
         if (failedSend) {
             when(outboxTransactionUseCase.recordFailure(any(), any())).thenThrow(new IllegalStateException("database unavailable"));
-            when(reservationMessagePublisherPort.publish(anyString(), anyString(), anyString()))
+            when(reservationMessagePublisherPort.publish(any(ReservationOutboxMessage.class)))
                 .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("broker unavailable")));
         } else {
             when(outboxTransactionUseCase.complete(any())).thenThrow(new IllegalStateException("database unavailable"));
-            when(reservationMessagePublisherPort.publish(anyString(), anyString(), anyString())).thenReturn(CompletableFuture.completedFuture(null));
+            when(reservationMessagePublisherPort.publish(any(ReservationOutboxMessage.class))).thenReturn(CompletableFuture.completedFuture(null));
         }
         PublishReservationOutboxService service = service(callbacks::add, 1);
         service.publishReady();
         callbacks.remove().run();
         service.publishReady();
-        verify(reservationMessagePublisherPort, times(2)).publish(anyString(), anyString(), anyString());
+        verify(reservationMessagePublisherPort, times(2)).publish(any(ReservationOutboxMessage.class));
     }
 
     @Test
     @DisplayName("Claim transaction 실패 후에도 다시 같은 용량으로 발행할 수 있다")
     void failedClaimReturnsReservedCapacity() {
         when(outboxTransactionUseCase.claimReady(1)).thenThrow(new IllegalStateException("database unavailable")).thenReturn(List.of(claim()));
-        when(reservationMessagePublisherPort.publish(anyString(), anyString(), anyString())).thenReturn(new CompletableFuture<>());
+        when(reservationMessagePublisherPort.publish(any(ReservationOutboxMessage.class))).thenReturn(new CompletableFuture<>());
         PublishReservationOutboxService service = service(callbacks::add, 1);
         assertThatThrownBy(service::publishReady).isInstanceOf(IllegalStateException.class);
         service.publishReady();
-        verify(reservationMessagePublisherPort).publish(anyString(), anyString(), anyString());
+        verify(reservationMessagePublisherPort).publish(any(ReservationOutboxMessage.class));
     }
 
     @Test
     @DisplayName("비어 있거나 요청보다 적은 Claim의 남는 Permit은 바로 반환한다")
     void unusedClaimCapacityIsReturnedImmediately() {
         when(outboxTransactionUseCase.claimReady(anyInt())).thenReturn(List.of(), List.of(claim()), List.of(claim()));
-        when(reservationMessagePublisherPort.publish(anyString(), anyString(), anyString())).thenReturn(new CompletableFuture<>());
+        when(reservationMessagePublisherPort.publish(any(ReservationOutboxMessage.class))).thenReturn(new CompletableFuture<>());
         PublishReservationOutboxService service = service(callbacks::add, 2);
         service.publishReady();
         service.publishReady();
         service.publishReady();
         verify(outboxTransactionUseCase).claimReady(1);
-        verify(reservationMessagePublisherPort, times(2)).publish(anyString(), anyString(), anyString());
+        verify(reservationMessagePublisherPort, times(2)).publish(any(ReservationOutboxMessage.class));
     }
 
     @Test
@@ -143,7 +142,7 @@ class PublishReservationOutboxServiceTest {
         AtomicInteger sent = new AtomicInteger();
         when(outboxTransactionUseCase.claimReady(anyInt())).thenAnswer(invocation ->
             IntStream.range(0, invocation.getArgument(0, Integer.class)).mapToObj(index -> claim()).toList());
-        when(reservationMessagePublisherPort.publish(anyString(), anyString(), anyString())).thenAnswer(invocation -> {
+        when(reservationMessagePublisherPort.publish(any(ReservationOutboxMessage.class))).thenAnswer(invocation -> {
             sent.incrementAndGet();
             return new CompletableFuture<Void>();
         });

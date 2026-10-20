@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import com.example.limitedticketing.purchasewaiting.application.port.out.dto.ReservationOutboxMessage;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -25,7 +27,7 @@ class KafkaReservationMessagePublisherTest {
     void futureCompletesOnlyAfterBrokerAcknowledgment() {
         CompletableFuture<SendResult<String, String>> kafkaAcknowledgment = new CompletableFuture<>();
         when(kafkaTemplate.send("topic", "1", "payload")).thenReturn(kafkaAcknowledgment);
-        CompletableFuture<Void> result = publisher.publish("topic", "1", "payload");
+        CompletableFuture<Void> result = publisher.publish(new ReservationOutboxMessage(UUID.randomUUID(), "topic", "1", "payload", 1));
         assertThat(result).isNotDone();
         assertThat(meterRegistry.get("reservation.outbox.publish").tag("result", "acknowledged").counter().count()).isZero();
         kafkaAcknowledgment.complete(mock(SendResult.class));
@@ -43,7 +45,7 @@ class KafkaReservationMessagePublisherTest {
         } else {
             when(kafkaTemplate.send("topic", "1", "payload")).thenReturn(CompletableFuture.failedFuture(failure));
         }
-        CompletableFuture<Void> result = publisher.publish("topic", "1", "payload");
+        CompletableFuture<Void> result = publisher.publish(new ReservationOutboxMessage(UUID.randomUUID(), "topic", "1", "payload", 1));
         assertThatThrownBy(result::join).hasCause(failure);
         assertThat(meterRegistry.get("reservation.outbox.publish").tag("result", "failed").counter().count()).isEqualTo(1);
         assertThat(meterRegistry.get("reservation.outbox.publish").tag("result", "acknowledged").counter().count()).isZero();

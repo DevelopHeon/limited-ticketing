@@ -2,7 +2,6 @@ package com.example.limitedticketing.purchasewaiting.application.service;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -42,7 +41,7 @@ class OutboxTransactionServiceTest {
             new ReservationOutboxMessage(UUID.randomUUID(), "requests", "1", "payload", attempts), UUID.randomUUID());
         when(purchaseWaitingOutboxPort.claimReady(any(), any(), any(), anyInt())).thenReturn(List.of(claim));
         CompletableFuture<Void> acknowledgment = new CompletableFuture<>();
-        when(reservationMessagePublisherPort.publish(anyString(), anyString(), anyString())).thenReturn(acknowledgment);
+        when(reservationMessagePublisherPort.publish(any(ReservationOutboxMessage.class))).thenReturn(acknowledgment);
         OutboxTransactionService outboxTransactionService = new OutboxTransactionService(purchaseWaitingOutboxPort, clock, 30);
         PublishReservationOutboxService service = new PublishReservationOutboxService(outboxTransactionService, reservationMessagePublisherPort, Runnable::run, 1, 1);
 

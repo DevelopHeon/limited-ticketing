@@ -65,7 +65,7 @@ public class PublishReservationOutboxService implements PublishReservationOutbox
     private void publish(ReservationOutboxClaim claim) {
         ReservationOutboxMessage message = claim.message();
         try {
-            reservationMessagePublisherPort.publish(message.topic(), message.key(), message.payload())
+            reservationMessagePublisherPort.publish(message)
                 .whenComplete((ignored, failure) -> submitCompletion(claim, failure));
         } catch (RuntimeException exception) {
             submitCompletion(claim, exception);

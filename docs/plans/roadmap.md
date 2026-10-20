@@ -10,6 +10,7 @@
 - 필수 검사와 작은 전달·복구 실험, 독립 리뷰·결함 수정·재리뷰를 마쳤다. 실행 중 중복은 ACK하지 않고 재전달하며 발행 backoff는 실제 실패 시점부터 계산한다.
 - 사용자가 별도로 요청한 Outbox 비동기 리팩토링은 `d3088f4` commit/push·Notion 기록을 마쳤다. Kafka 조정 값의 YAML 이동과 사용자가 수정한 Outbox Scheduler 설정 키도 후속 변경으로 구현·검증·독립 리뷰를 마쳤다. 한국어 commit/push와 기존 Notion 기록 갱신 후 사용자 검토를 기다린다.
 - 다음 단계는 사용자의 명시적인 시작 요청 후 논의한다. 4단계 캐시를 자동 시작하지 않는다.
+- Publisher는 기존 `ReservationOutboxMessage`를 받는 계약으로 정리했다. Consumer의 계약 DTO 자동 변환은 검토 후 보류했으며 문자열 수신·검증·DLT 경로를 유지한다. `./gradlew check :app:bootJar --continue`에서 Java 256개 테스트와 아키텍처·컨벤션 검사 및 빌드가 통과했다. 독립 리뷰에서도 결함이 발견되지 않았으며 한국어 commit/push와 기존 Notion 기록 갱신 후 사용자 검토를 기다린다.
 
 ## 단계별 진행
 

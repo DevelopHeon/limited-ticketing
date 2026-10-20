@@ -11,7 +11,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.ArgumentMatchers.anyString;
 import com.example.limitedticketing.inventory.domain.model.Inventory;
 import com.example.limitedticketing.inventory.domain.repository.InventoryRepository;
 import com.example.limitedticketing.member.domain.model.Member;
@@ -130,7 +129,7 @@ class PurchaseWaitingOutboxIntegrationTest {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
             assertThat(jdbcTemplate.queryForObject("SELECT claim_id FROM reservation_job_outbox WHERE waiting_entry_id = ?", UUID.class, entry.getId())).isNotNull();
             return CompletableFuture.completedFuture(null);
-        }).when(reservationMessagePublisherPort).publish(anyString(), anyString(), anyString());
+        }).when(reservationMessagePublisherPort).publish(any(ReservationOutboxMessage.class));
         doAnswer(invocation -> {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
             return invocation.callRealMethod();
@@ -146,12 +145,12 @@ class PurchaseWaitingOutboxIntegrationTest {
     @DisplayName("DB transaction이 열린 진입은 Claim과 Kafka 전송 전에 거부한다")
     void ambientTransactionIsRejectedBeforeClaimingOrPublishing() {
         doAnswer(invocation -> CompletableFuture.completedFuture(null))
-            .when(reservationMessagePublisherPort).publish(anyString(), anyString(), anyString());
+            .when(reservationMessagePublisherPort).publish(any(ReservationOutboxMessage.class));
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
             PurchaseWaitingEntry entry = createWaiting();
             claimPurchaseWaitingUseCase.claim(new ClaimPurchaseWaitingCommand(entry.getId(), UUID.randomUUID())).orElseThrow();
             assertThatThrownBy(publishReservationOutboxUseCase::publishReady).isInstanceOf(IllegalTransactionStateException.class);
-            verify(reservationMessagePublisherPort, never()).publish(anyString(), anyString(), anyString());
+            verify(reservationMessagePublisherPort, never()).publish(any(ReservationOutboxMessage.class));
             assertThat(jdbcTemplate.queryForObject("SELECT claim_id FROM reservation_job_outbox WHERE waiting_entry_id = ?", UUID.class, entry.getId())).isNull();
             assertThat(jdbcTemplate.queryForObject("SELECT publish_attempts FROM reservation_job_outbox WHERE waiting_entry_id = ?", Integer.class, entry.getId())).isZero();
             status.setRollbackOnly();

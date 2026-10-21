@@ -2,6 +2,7 @@
 
 - 상태: **Accepted**
 - 결정일: 2026-10-16.
+- 2026-10-21 변경: 아래 최초 결정의 Facade·PortService 구분은 [진입 구현 통합](#진입-구현-통합--2026-10-21)으로 대체한다. 입력 Adapter 배치와 공개 Port·내부 UseCase 구분은 유지한다.
 - [ADR 0007](0007-purchasewaiting-ports-and-adapters.md)의 별도 입력 Adapter 업무 조합·Port 구현 책임을 대체한다. infrastructure의 입력·출력 배치는 유지한다.
 
 ## 배경과 대안
@@ -38,3 +39,15 @@ PurchaseWaitingCommandAdapter는 접수 UseCase를 실행한 뒤 조회 UseCase�
 ## 명명 규칙 정리 · 2026-10-19
 
 사용자 논의에 따라 Input Port의 단순 연결 구현을 PortService로 통일한다. EntryService 9개와 위 최초 전환 당시의 PurchaseWaitingQueryService·PurchaseWaitingWorkerService를 각각 대응하는 PortService 이름으로 변경한다. Facade의 업무 조합, 내부 UseCase 구현 Service, 공개 계약과 transaction 경계는 유지한다. 별도 계층을 추가하는 결정은 아니며 현재 이름과 역할은 [모듈 설계](../architecture/module-boundaries.md#레이어-구조)를 따른다.
+
+## 진입 구현 통합 · 2026-10-21
+
+Facade와 PortService가 모두 Input Port를 구현하면서 UseCase 조합 여부로 이름을 구분해 역할을 이해하기 어려웠다. 사용자 논의 후 Facade를 제거하고 진입 구현을 PortService로 통일한다. 결제 하위 시스템을 감추는 Facade 패턴 일반을 부정하는 결정이 아니라 이 프로젝트의 입력 구현 명명을 정리하는 결정이다.
+
+- PortService는 공개 DTO를 내부 DTO로 변환하고 한 개 또는 여러 UseCase의 실행·분기·실패 흐름을 조율한다. 여러 UseCase를 주입하거나 한 메서드에서 조합한다는 이유로 다른 이름을 쓰지 않는다.
+- 공개 Input Port와 내부 UseCase를 하나로 합치는 대안은 호출 단계를 줄이지만 사용자가 유지하려는 공개·내부 업무 계약 구분을 없애므로 채택하지 않는다.
+- PortService의 Output Port 직접 호출을 허용하면 짧은 후처리를 바로 표현할 수 있다. 사용자는 경계를 명확히 학습하기 위해 직접 호출 금지를 선택했다. Repository·Output Port·구체 Service·Aggregate 사용은 업무 Service에 두며, enum의 DTO 변환은 허용한다.
+- PurchaseWaitingCommandPortService는 접수 → 조회를, PurchaseWaitingReservationPortService는 시작·예약·실패 기록·슬롯 반환 UseCase를 조율한다. Redis 슬롯 반환은 별도 UseCase·Command·Service가 필요해 파일과 호출 단계가 늘어난다. 이는 선택한 의존 규칙의 명시적인 비용이다.
+- 내부 업무 Service는 다른 내부 UseCase·Domain Repository·Output Port를 사용할 수 있다. UseCase 조합을 진입 구현만의 역할로 제한하지 않는다. 자신의 Input Port·PortService나 다른 구현 Service를 직접 호출하지 않는다.
+- 기존 접수 commit·Redis afterCommit 이후 조회, 예약 시작·구매·대기 결과의 transaction과 Consumer offset 경계를 유지한다. PortService에 전체 transaction을 추가하지 않는다. 슬롯 반환 실패는 DB 결과를 유지하고 복구에 맡긴다.
+- ArchUnit은 진입 구현 위치·이름, 금지된 직접 의존과 Aggregate 사용, facade 패키지 제거를 검사한다. Modulith의 공개 모듈 경계는 유지한다. 검증 실행 상태는 [로드맵](../plans/roadmap.md), 현재 호출 그림은 [모듈 설계](../architecture/module-boundaries.md#호출-흐름과-의존-방향)가 소유한다.

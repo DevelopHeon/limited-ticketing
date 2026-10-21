@@ -4,6 +4,7 @@ import com.example.limitedticketing.purchasewaiting.application.port.out.Purchas
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingOutboxPort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingQueuePort;
 import com.example.limitedticketing.purchasewaiting.application.usecase.ReplayPurchaseWaitingUseCase;
+import com.example.limitedticketing.purchasewaiting.application.usecase.dto.result.PurchaseWaitingResult;
 import com.example.limitedticketing.purchasewaiting.domain.exception.PurchaseWaitingException;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingEntry;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingStatus;
@@ -44,7 +45,7 @@ public class ReplayPurchaseWaitingService implements ReplayPurchaseWaitingUseCas
 
     @Override
     @Transactional
-    public PurchaseWaitingEntry replay(UUID waitingEntryId) {
+    public PurchaseWaitingResult replay(UUID waitingEntryId) {
         Long saleProductId = purchaseWaitingEntryRepository.findSaleProductId(waitingEntryId).orElseThrow(PurchaseWaitingException::notFound);
         purchaseWaitingEntryRepository.lockAdmission();
         purchaseWaitingEntryRepository.lockQueue(saleProductId);
@@ -86,6 +87,6 @@ public class ReplayPurchaseWaitingService implements ReplayPurchaseWaitingUseCas
                 }
             }
         });
-        return saved;
+        return PurchaseWaitingResult.from(saved, null);
     }
 }

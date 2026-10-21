@@ -21,7 +21,7 @@
 ## 그림을 읽는 기준
 
 - `sale`, `purchase`, `inventory`, `payment`, `purchasewaiting`은 같은 코드·DB를 공유하는 모듈이다. 모듈 간 화살표는 Output Port → ModuleAdapter → 상대 Input Port의 JVM 내부 호출을 줄여 표현한다.
-- HTTP Controller·Consumer·Scheduler는 Input Adapter다. Input Port → PortService 또는 Facade → 내부 UseCase/Service를 거친다. 그림에는 업무 이해에 필요한 참여자만 표시한다.
+- HTTP Controller·Consumer·Scheduler는 Input Adapter다. Input Port → PortService → 내부 UseCase/Service를 거친다. 그림에는 업무 이해에 필요한 참여자만 표시한다.
 - DB 화살표는 Repository·PersistenceAdapter 또는 Outbox Adapter·JdbcRepository를 거친다. commit 표시는 실제 transaction 경계이며 Redis·Kafka까지 한 transaction으로 묶인다는 뜻이 아니다.
 - 기본 실행은 API와 Worker가 한 프로세스다. 역할을 분리하면 HTTP는 API, Scheduler·Consumer는 Worker가 맡는다. 배치는 [Deployment](deployment.md)를 따른다.
 
@@ -104,7 +104,7 @@ sequenceDiagram
 
 접수 성공은 예약·결제 완료를 뜻하지 않는다. 속도·수용량 초과는 429, 새 접수의 Redis 입구 검사 실패는 503으로 거부하며 새 원장을 만들지 않는다. DB commit 후 Redis 등록 실패는 접수를 되돌리지 않는다. 조회 시 Redis가 불가하면 DB 상태를 반환하고 위치는 null이다. 내부 DISPATCHED는 공개 응답에서 PROCESSING으로 표시한다.
 
-코드: [접수](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/service/EnqueuePurchaseWaitingService.java), [접수 Facade](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/facade/PurchaseWaitingCommandFacade.java), [조회](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/service/FindPurchaseWaitingService.java).
+코드: [접수](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/service/EnqueuePurchaseWaitingService.java), [접수 진입](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/service/PurchaseWaitingCommandPortService.java), [조회](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/service/FindPurchaseWaitingService.java).
 
 ## 입장과 Outbox 발행
 
@@ -159,8 +159,10 @@ Consumer는 메시지의 schema·상품 key를 검사하고 DB Outbox의 eventId
 sequenceDiagram
     autonumber
     participant Kafka as Kafka
-    participant Consumer as Consumer·ReservationFacade
+    participant Consumer as Consumer·ReservationPortService
     participant Waiting as 대기 실행 UseCase
+    participant Release as 슬롯 반환 UseCase·Service
+    participant Redis as Redis
     participant Purchase as purchase
     participant Inventory as inventory
     participant DB as PostgreSQL
@@ -188,7 +190,9 @@ sequenceDiagram
         Purchase-->>Waiting: 구매 ID
         Waiting->>DB: 대기 RESERVED 저장·결과 transaction commit
         Waiting-->>Consumer: 결과 확정
-        Consumer->>Consumer: Redis 슬롯 반환 시도
+        Consumer->>Release: 결과 commit 후 슬롯 반환 요청
+        Release->>Redis: token 일치 시 processing 슬롯 제거
+        Note over Release,Redis: Redis 실패 시 DB 결과를 유지하고 복구에 위임
         Consumer->>Kafka: ACK·offset 저장
     end
 ```
@@ -199,7 +203,7 @@ JSON/version/key 등 잘못된 메시지는 ErrorHandler가 DLT 전송 성공을
 
 구매·재고 commit과 대기 결과 commit은 별개다. 따라서 구매만 성공한 뒤 장애가 나도 같은 구매 키로 재예약 효과를 중복 생성하지 않고 결과를 복원할 수 있다. Consumer는 동기 업무 호출이며 Outbox 발행 Future와 별개의 실행 경로다. RESERVED는 결제 대기 예약이고 최종 판매 확정은 결제 승인에서 수행한다.
 
-코드: [Consumer](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/infrastructure/adapter/in/messaging/ReservationKafkaConsumer.java), [예약 Facade](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/facade/PurchaseWaitingReservationFacade.java), [예약 처리](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/service/ProcessPurchaseWaitingService.java), [기술 실패 기록](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/service/RecordPurchaseWaitingFailureService.java), [구매 예약](../../purchase/src/main/java/com/example/limitedticketing/purchase/application/service/PurchaseCommandService.java).
+코드: [Consumer](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/infrastructure/adapter/in/messaging/ReservationKafkaConsumer.java), [예약 진입](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/service/PurchaseWaitingReservationPortService.java), [슬롯 반환](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/service/ReleasePurchaseWaitingSlotService.java), [예약 처리](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/service/ProcessPurchaseWaitingService.java), [기술 실패 기록](../../purchasewaiting/src/main/java/com/example/limitedticketing/purchasewaiting/application/service/RecordPurchaseWaitingFailureService.java), [구매 예약](../../purchase/src/main/java/com/example/limitedticketing/purchase/application/service/PurchaseCommandService.java).
 
 ## 결제
 

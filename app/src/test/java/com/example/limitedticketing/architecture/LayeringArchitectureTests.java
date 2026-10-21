@@ -112,7 +112,7 @@ class LayeringArchitectureTests {
 
     @ParameterizedTest(name = "{displayName} [{arguments}]")
     @ValueSource(strings = {"member", "sale", "inventory", "purchase", "payment", "purchasewaiting"})
-    @DisplayName("내부 업무 Service는 자신의 입력 Port와 Facade를 역호출하지 않는다")
+    @DisplayName("내부 업무 Service는 자신의 입력 Port를 역호출하지 않는다")
     void coreServicesDoNotCallBackIntoInputPorts(String module) {
         String base = ROOT + "." + module;
         noClasses().that().resideInAPackage(base + ".application.service..")
@@ -121,6 +121,64 @@ class LayeringArchitectureTests {
                     contract.getPackageName().startsWith(base + ".application.port.in"))))
             .should().dependOnClassesThat().resideInAnyPackage(base + ".application.port.in..", base + ".application.facade..")
             .because("진입 Service의 Port 구현은 허용하지만 내부 업무 Service는 UseCase로 실행한다")
+            .check(importedClasses);
+    }
+
+    @ParameterizedTest(name = "{displayName} [{arguments}]")
+    @ValueSource(strings = {"member", "sale", "inventory", "purchase", "payment", "purchasewaiting"})
+    @DisplayName("Service 간 업무 호출은 구체 구현이 아닌 내부 UseCase를 사용한다")
+    void servicesDoNotDependOnOtherServiceImplementations(String module) {
+        String base = ROOT + "." + module;
+        noClasses().that().resideInAPackage(base + ".application.service")
+            .and().haveSimpleNameEndingWith("Service")
+            .should().dependOnClassesThat(DescribedPredicate.describe("같은 모듈의 구체 Service", type ->
+                type.getPackageName().equals(base + ".application.service") && type.getSimpleName().endsWith("Service")))
+            .because("내부 record와 commit 콜백은 Service 구현이 아니며 다른 업무 구현은 UseCase를 통해 호출한다")
+            .check(importedClasses);
+    }
+
+    @ParameterizedTest(name = "{displayName} [{arguments}]")
+    @ValueSource(strings = {"member", "sale", "inventory", "purchase", "payment", "purchasewaiting"})
+    @DisplayName("입력 Port 구현은 PortService로 통일하고 별도 Facade를 두지 않는다")
+    void inputPortsAreImplementedByPortServices(String module) {
+        String base = ROOT + "." + module;
+        classes().that().resideInAPackage(base + ".application..")
+            .and(DescribedPredicate.describe("자기 모듈의 Input Port 구현", type ->
+                type.getAllRawInterfaces().stream().anyMatch(contract ->
+                    contract.getPackageName().startsWith(base + ".application.port.in"))))
+            .should().haveSimpleNameEndingWith("PortService")
+            .andShould().resideInAPackage(base + ".application.service")
+            .because("진입 연결과 UseCase 조율은 PortService가 함께 맡는다")
+            .check(importedClasses);
+    }
+
+    @ParameterizedTest(name = "{displayName} [{arguments}]")
+    @ValueSource(strings = {"member", "sale", "inventory", "purchase", "payment", "purchasewaiting"})
+    @DisplayName("PortService는 Repository와 Output Port 및 구현 Service를 직접 호출하지 않는다")
+    void portServicesOnlyExecuteThroughUseCases(String module) {
+        String base = ROOT + "." + module;
+        noClasses().that().resideInAPackage(base + ".application..")
+            .and(DescribedPredicate.describe("자기 모듈의 Input Port 구현", type ->
+                type.getAllRawInterfaces().stream().anyMatch(contract ->
+                    contract.getPackageName().startsWith(base + ".application.port.in"))))
+            .should().dependOnClassesThat().resideInAnyPackage(
+                base + ".domain.repository..", base + ".application.port.out..",
+                base + ".application.service..", base + ".application.facade..", base + ".infrastructure.."
+            )
+            .because("PortService는 DTO를 변환하고 내부 UseCase를 조율하며 저장소와 외부 기능은 업무 Service에 위임한다")
+            .check(importedClasses);
+    }
+
+    @ParameterizedTest(name = "{displayName} [{arguments}]")
+    @ValueSource(strings = {"member", "sale", "inventory", "purchase", "payment", "purchasewaiting"})
+    @DisplayName("PortService는 Aggregate 대신 내부 결과 DTO를 변환한다")
+    void portServicesDoNotManipulateAggregates(String module) {
+        String base = ROOT + "." + module;
+        noClasses().that().resideInAPackage(base + ".application.service")
+            .and().haveSimpleNameEndingWith("PortService")
+            .should().dependOnClassesThat(DescribedPredicate.describe("Domain의 Aggregate와 상태 객체", type ->
+                type.getPackageName().startsWith(base + ".domain.model") && !type.isEnum()))
+            .because("상태값의 DTO 변환은 허용하지만 Aggregate의 조회와 변경은 내부 업무 Service가 맡는다")
             .check(importedClasses);
     }
 
@@ -164,13 +222,13 @@ class LayeringArchitectureTests {
 
     @ParameterizedTest(name = "{displayName} [{arguments}]")
     @ValueSource(strings = {"member", "sale", "inventory", "purchase", "payment", "purchasewaiting"})
-    @DisplayName("이전 presentation과 command query support 패키지는 남기지 않는다")
+    @DisplayName("이전 presentation과 command query support 및 facade 패키지는 남기지 않는다")
     void legacyPackagesAreRemoved(String module) {
         String base = ROOT + "." + module;
         classes().that().resideInAPackage(base + "..")
             .should().resideOutsideOfPackages(
                 base + ".presentation..", base + ".application.command..", base + ".application.query..",
-                base + ".application.support.."
+                base + ".application.support..", base + ".application.facade.."
             )
             .because("합의한 패키지 경계를 전체 모듈에 적용하고 이전 구현 경로를 함께 정리한다")
             .check(importedClasses);

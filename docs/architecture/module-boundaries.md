@@ -98,8 +98,7 @@ package com.example.limitedticketing.member.application.port.in;
 │   │   └── worker/              다른 모듈에 공개하지 않는 스케줄 진입 Port
 │   ├── port/out/                외부 기능·기술·검색 조회 계약과 출력 DTO
 │   ├── usecase/                 내부 업무 interface·command/query/result DTO
-│   ├── service/                 UseCase 구현·transaction·단순 Port 진입 연결
-│   └── facade/                  여러 UseCase의 순차 조합이 필요한 경우
+│   └── service/                 PortService의 진입 조율·업무 Service의 UseCase 구현
 ├── domain/
 │   ├── model/                   Aggregate·상태 규칙
 │   ├── repository/              Aggregate 조회·저장 추상 계약과 저장 결과
@@ -113,17 +112,45 @@ package com.example.limitedticketing.member.application.port.in;
     └── out/...                  Redis·이벤트·실행기 등 실제 필요한 구현
 ```
 
-Controller·Consumer·Scheduler 자체가 Input Adapter이며 Input Port를 호출한다. 일반 진입 PortService는 Input/Output과 내부 DTO를 변환해 UseCase에 연결한다. 여러 UseCase를 순서대로 조합하는 PurchaseWaitingCommandFacade와 PurchaseWaitingReservationFacade는 facade에 둔다. Application 내부 업무 호출은 UseCase를 사용한다. 의존성 필드·생성자·테스트에는 Port·UseCase·Repository·Service·Adapter 등 타입의 역할 접미사를 유지한다.
+Controller·Consumer·Scheduler 자체가 Input Adapter이며 Input Port를 호출한다. PortService는 공개 Input/Output과 내부 DTO를 변환하고, 한 개 또는 여러 내부 UseCase를 실행·조율한다. 별도 Facade와 facade 패키지는 두지 않는다. Application 내부 업무 호출은 UseCase를 사용한다. 의존성 필드·생성자·테스트에는 Port·UseCase·Repository·Service·Adapter 등 타입의 역할 접미사를 유지한다.
 
 | Application 구현 | 역할 | 예시 |
 |---|---|---|
-| PortService | Input Port 구현, 공개 DTO와 내부 DTO 변환, 개별 UseCase 연결 | InventoryCommandPortService |
-| Facade | Input Port 구현, 여러 UseCase의 실행 순서 조합 | PurchaseWaitingCommandFacade |
+| PortService | Input Port 구현, 공개 DTO와 내부 DTO 변환, 내부 UseCase의 순서·분기 조율 | InventoryCommandPortService, PurchaseWaitingCommandPortService |
 | 업무 Service | 내부 UseCase 구현, transaction·Domain·Repository·Output Port 사용 | InventoryCommandService |
 
-PortService와 Facade는 같은 Application 계층의 진입 구현이다. Facade 앞에 별도 PortService를 추가하지 않는다. PortService는 이 프로젝트에서 사용하는 Input Port 구현 명명 규칙이며 새로운 계층은 아니다.
+PortService와 업무 Service는 같은 Application 계층 안에서 책임을 나눈다. Input Port와 UseCase는 각각 공개 진입 계약과 내부 업무 계약을 표현하는 interface이며 별도 실행 레이어가 아니다. 공개·내부 계약을 분리하기 위해 연결 코드가 남는 것은 이 프로젝트에서 선택한 비용이다. [ADR 0008의 변경 결정](../adr/0008-application-entry-orchestration.md#진입-구현-통합--2026-10-21)을 따른다.
 
-PortService가 여러 UseCase를 주입받더라도 메서드마다 하나씩 호출하면 Facade로 보지 않는다. ReservationFacade는 실행 시작·예약·실패 기록 UseCase의 각 transaction을 조합하고, 결과 확정 후 Redis 슬롯 해제를 Output Port로 호출한다. Facade 전체를 하나의 transaction으로 묶지 않는다. Input Adapter가 Input Port를 직접 구현하도록 강제하지 않으며, Output Adapter는 자신의 Output Port 또는 Domain Repository를 구현한다.
+PortService는 Repository·Output Port·구체 Service·Aggregate를 직접 참조하지 않는다. 내부 결과 DTO와 상태 enum의 응답 변환은 허용한다. 업무 Service는 자기 모듈의 다른 UseCase·Domain Repository·Output Port를 사용할 수 있지만 자신의 Input Port·PortService나 다른 구현 Service를 직접 호출하지 않는다. 다른 모듈 호출은 자신의 Output Port와 ModuleAdapter를 거친다.
+
+UseCase 개수로 역할을 구분하지 않는다. PortService는 외부 요청의 실행 흐름을, 업무 Service는 내부 업무의 세부 처리를 조율할 수 있다. InventoryCommandPortService는 메서드별 개별 UseCase에 위임하고, PurchaseWaitingCommandPortService는 한 메서드에서 접수 → 조회를 조합한다. PurchaseWaitingReservationPortService는 시작·예약·실패 기록·슬롯 반환 UseCase를 조율한다. Redis 반환의 오류 처리는 ReleasePurchaseWaitingSlotService가 맡으며 확정된 DB 결과를 유지하고 복구에 위임한다.
+
+접수·예약 PortService 전체를 transaction으로 묶지 않는다. 접수 commit·Redis afterCommit 이후 조회, 예약 시작·구매·대기 결과의 기존 transaction 경계를 유지한다. 별도 transaction을 갖는 ReserveWaitingPurchaseUseCase처럼 이유가 있는 내부 UseCase 호출은 유지한다. Input Adapter는 Input Port를 호출하고, Output Adapter는 Output Port 또는 Domain Repository를 구현한다.
+
+### 호출 흐름과 의존 방향
+
+아래 실선은 실행 시 호출 흐름이다. 화살표의 Input Port·UseCase는 다음 구현체의 interface 계약이며 중간 실행 객체가 하나 더 생기는 것이 아니다.
+
+```mermaid
+flowchart TB
+    input["Infrastructure · Input Adapter<br/>Controller / Scheduler / Consumer"]
+    entry["Application · PortService<br/>Input Port 구현 · DTO 변환 · 흐름 조율"]
+    service["Application · 업무 Service<br/>내부 UseCase 구현 · transaction"]
+    model["Domain · Aggregate<br/>상태와 업무 규칙"]
+    repository["Domain Repository<br/>Aggregate 영속성 계약"]
+    output["Application Output Port<br/>외부 기능 계약<br/>Redis / Kafka / 다른 모듈"]
+    persistence["Infrastructure · PersistenceAdapter"]
+    adapter["Infrastructure · Output Adapter"]
+    input -->|"Input Port"| entry
+    entry -->|"내부 UseCase"| service
+    service --> model
+    service --> repository
+    service --> output
+    repository --> persistence
+    output --> adapter
+```
+
+소스 의존성은 Application → Domain 및 추상 계약, Infrastructure → 해당 계약이다. Repository·Output Port를 구현하는 Adapter의 구체 타입을 업무 Service에서 참조하지 않는다. 다른 모듈 호출은 `업무 Service → 자기 Output Port → ModuleAdapter → 상대 Input Port → 상대 PortService → 내부 UseCase`다.
 
 ### Aggregate 영속성과 Application 출력 계약
 
@@ -134,7 +161,7 @@ PortService가 여러 UseCase를 주입받더라도 메서드마다 하나씩 �
 판매 목록의 필터·정렬·페이지 조회는 SaleProductSearchPort, Redis 대기·복구·입구 제한과 외부 모듈 호출·이벤트 발행은 Application Output Port다. 상품별 순번 발급도 Aggregate 저장 계약과 구분해 기존 Sequence Port를 유지한다.
 
 ```text
-외부 입력 → Input Port → PortService / Facade → UseCase → 업무 Service
+외부 입력 → Input Port → PortService → UseCase → 업무 Service
   ├─ Aggregate 영속화 → Domain Repository → PersistenceAdapter
   └─ 검색·외부 기능 → Application Output Port → Driven Adapter
 ```

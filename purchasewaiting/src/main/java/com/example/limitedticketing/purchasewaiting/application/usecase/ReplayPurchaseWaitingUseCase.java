@@ -1,8 +1,8 @@
 package com.example.limitedticketing.purchasewaiting.application.usecase;
 
-import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingEntry;
+import com.example.limitedticketing.purchasewaiting.application.usecase.dto.result.PurchaseWaitingResult;
 import java.util.UUID;
 
 public interface ReplayPurchaseWaitingUseCase {
-    PurchaseWaitingEntry replay(UUID waitingEntryId);
+    PurchaseWaitingResult replay(UUID waitingEntryId);
 }

@@ -13,7 +13,7 @@ ADR 0001–0004는 **2026-10-15에 기존 구현과 문서를 근거로 회고 �
 | [0005](0005-inbound-outbound-adapters.md) | Superseded · ADR 0007·0008 | 최초 presentation 입력·infrastructure 출력 배치 |
 | [0006](0006-durable-queue-admission-and-attempts.md) | Accepted | DB 순번·입구 상한·시도 토큰·lease와 실행 슬롯 보호 |
 | [0007](0007-purchasewaiting-ports-and-adapters.md) | Partially Superseded · ADR 0008·0009 | 입력·출력 Adapter를 infrastructure에 배치하고 Port/UseCase/Service 이름 통일 |
-| [0008](0008-application-entry-orchestration.md) | Accepted | Controller·Scheduler를 입력 Adapter로 보고 업무 조합은 Application Facade에 배치 |
+| [0008](0008-application-entry-orchestration.md) | Accepted | 입력 Adapter와 Application 분리, 진입 구현을 PortService로 통합·내부 UseCase 조율 |
 | [0009](0009-domain-repository-ownership.md) | Accepted | Aggregate 영속성은 Domain Repository, 검색·외부 기능은 Application Output Port |
 | [0010](0010-kafka-reservation-outbox.md) | Accepted | 예약 상태와 Outbox 원자 저장·Kafka 전달·업무 멱등성·API/Worker 역할 |
 | [0011](0011-asynchronous-outbox-claim-lease.md) | Accepted | 짧은 Outbox Claim/Lease·비동기 Kafka 발행·제한된 완료 콜백 |

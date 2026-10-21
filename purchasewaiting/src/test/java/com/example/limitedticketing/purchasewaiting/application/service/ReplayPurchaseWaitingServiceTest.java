@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseReservationLookupPort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingOutboxPort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingQueuePort;
+import com.example.limitedticketing.purchasewaiting.application.usecase.dto.result.PurchaseWaitingResult;
 import com.example.limitedticketing.purchasewaiting.domain.exception.PurchaseWaitingException;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingEntry;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingStatus;
@@ -67,9 +68,9 @@ class ReplayPurchaseWaitingServiceTest {
         when(purchaseWaitingOutboxPort.findPublishedAt(entry.getId(), entry.getProcessingToken())).thenReturn(Optional.of(NOW.minusMinutes(2)));
         when(purchaseReservationLookupPort.findPurchaseId(entry.getMemberId(), entry.getSaleProductId(), entry.getPurchaseRequestKey())).thenReturn(Optional.of(91L));
         when(purchaseWaitingEntryRepository.save(entry)).thenReturn(entry);
-        PurchaseWaitingEntry result = service().replay(entry.getId());
-        assertThat(result.getStatus()).isEqualTo(PurchaseWaitingStatus.RESERVED);
-        assertThat(result.getPurchaseId()).isEqualTo(91L);
+        PurchaseWaitingResult result = service().replay(entry.getId());
+        assertThat(result.status()).isEqualTo(PurchaseWaitingStatus.RESERVED);
+        assertThat(result.purchaseId()).isEqualTo(91L);
     }
 
     @Test
@@ -82,10 +83,10 @@ class ReplayPurchaseWaitingServiceTest {
         when(purchaseWaitingOutboxPort.findPublishedAt(entry.getId(), entry.getProcessingToken())).thenReturn(Optional.of(NOW.minusSeconds(60)));
         when(purchaseReservationLookupPort.findPurchaseId(entry.getMemberId(), entry.getSaleProductId(), entry.getPurchaseRequestKey())).thenReturn(Optional.empty());
         when(purchaseWaitingEntryRepository.save(entry)).thenReturn(entry);
-        PurchaseWaitingEntry replayed = service().replay(entry.getId());
-        assertThat(replayed.getStatus()).isEqualTo(PurchaseWaitingStatus.WAITING);
-        assertThat(replayed.getProcessingToken()).isNull();
-        assertThat(replayed.getExecutionAttempts()).isEqualTo(1);
+        PurchaseWaitingResult replayed = service().replay(entry.getId());
+        assertThat(replayed.status()).isEqualTo(PurchaseWaitingStatus.WAITING);
+        assertThat(entry.getProcessingToken()).isNull();
+        assertThat(entry.getExecutionAttempts()).isEqualTo(1);
     }
 
     private PurchaseWaitingEntry dispatched() {

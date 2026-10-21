@@ -12,6 +12,10 @@ public record FindSaleProductsQuery(
     SaleProductSort sort,
     SortDirection direction
 ) {
+    public FindSaleProductsQuery(SaleStatus status, int page, int size, String sortProperty, String direction) {
+        this(status, page, size, SaleProductSort.fromRequestProperty(sortProperty), SortDirection.fromRequestDirection(direction));
+    }
+
     public FindSaleProductsQuery {
         if (page < 0 || size < 1 || size > 100) {
             throw SaleException.invalid("Page must be non-negative and size must be between 1 and 100");

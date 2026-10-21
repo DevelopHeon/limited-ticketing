@@ -9,7 +9,7 @@
 - 동일 회원·상품의 활성 대기는 DB partial unique index로 하나만 허용한다. 속도 제한 시간이 지나도 다른 키로 중복 대기하면 409다.
 - 수락 전 Redis 불가는 503 `QUEUE_UNAVAILABLE`이며 원장을 생성하지 않는다. 429/503은 `Retry-After: 1`을 보낸다.
 - DB 커밋 뒤 Redis 등록 실패는 202를 유지하고 복구가 등록한다. 상태 조회는 소유권 확인 후 DB 기준으로 응답한다. Redis 장애 시 WAITING의 position은 null이다.
-- 직접 예약 HTTP는 `baseline` profile에서만 제공한다. 기본 실행의 구매 진입은 대기 API를 사용한다. 내부 예약 Facade·결제·취소는 그대로 사용한다.
+- 직접 예약 HTTP는 `baseline` profile에서만 제공한다. 기본 실행의 구매 진입은 대기 API를 사용한다. 내부 예약 Port·결제·취소는 그대로 사용한다.
 
 ## 원장과 Redis 키
 
@@ -28,7 +28,7 @@ admission:sale:{saleId}:member:{memberId}  SET NX, TTL 1초
 
 ```mermaid
 flowchart LR
-    http["HTTP Controller"] --> api["Command / Query Port<br/>Facade · PortService"]
+    http["HTTP Controller"] --> api["Command / Query Port<br/>PortService"]
     api --> admission["접수·조회 UseCase / Service"]
     scheduler["Scheduler Input Adapter"] --> worker["Worker Port / PortService"]
     worker --> dispatch["입장·복구 UseCase / Service"]
@@ -43,14 +43,14 @@ flowchart LR
     callback --> tx
     kafkaAdapter --> kafka[("Kafka")]
     kafka --> consumer["Consumer Input Adapter"]
-    consumer --> execution["Reservation Port / Facade<br/>시작·실행·실패 복원 UseCase"]
+    consumer --> execution["Reservation Port / PortService<br/>시작·실행·실패 복원·슬롯 반환 UseCase"]
     execution --> store
     execution -->|"실행 소진 DLT 기록"| outbox
     execution --> purchase["예약·결과 조회 Output Port<br/>PurchaseModuleAdapter"]
     purchase --> publicApi["purchase 공개 Input Port"]
 ```
 
-Controller·Scheduler·Consumer는 입력 Adapter다. Application의 Facade가 여러 UseCase를 조합하고, 단순 Port 연결은 PortService가 맡는다. Aggregate 영속성은 Domain Repository, Outbox·Kafka·Redis·다른 모듈 기능은 Application Output Port로 구분한다.
+Controller·Scheduler·Consumer는 입력 Adapter다. Application의 PortService가 내부 UseCase를 연결·조율하며, Repository·Output Port를 직접 호출하지 않는다. 업무 Service는 내부 UseCase를 구현하고 저장소·외부 기능을 호출한다. Aggregate 영속성은 Domain Repository, Outbox·Kafka·Redis·다른 모듈 기능은 Application Output Port로 구분한다.
 
 ## 상태와 처리 흐름
 
@@ -115,8 +115,7 @@ purchasewaiting/
 │   │   └── worker/              모듈 내부 Worker Port와 전용 DTO
 │   ├── port/out/                외부 기능 계약과 작업 DTO
 │   ├── usecase/                 업무 interface와 Command/Query/Result
-│   ├── facade/                  공개 Port 구현·여러 UseCase 조합
-│   └── service/                 UseCase 구현·트랜잭션, 단순 진입 Port 연결
+│   └── service/                 PortService의 진입 조율·업무 Service의 UseCase 구현
 ├── domain/model/                PurchaseWaitingEntry·PurchaseWaitingStatus
 ├── domain/exception/            PurchaseWaitingException
 ├── domain/repository/           PurchaseWaitingEntryRepository·저장 결과
@@ -136,7 +135,7 @@ purchasewaiting/
 ### 호출과 책임
 
 ```text
-HTTP Controller → PurchaseWaitingCommandPort → PurchaseWaitingCommandFacade
+HTTP Controller → PurchaseWaitingCommandPort → PurchaseWaitingCommandPortService
  → EnqueuePurchaseWaitingUseCase → EnqueuePurchaseWaitingService
  → Domain Repository → PurchaseWaitingPersistenceAdapter
 
@@ -152,7 +151,9 @@ Process Service → ReserveWaitingPurchaseUseCase → ReserveWaitingPurchaseServ
 
 Controller는 HTTP 경로·헤더·인증 주체를 Input으로 변환하고 HTTP 응답을 만든다. Scheduler는 실행 주기를 맡는다. 이들은 Input Port를 호출하며 내부 UseCase나 구현 Service를 직접 참조하지 않는다.
 
-PurchaseWaitingCommandFacade가 접수 UseCase의 UUID를 받아 조회 UseCase를 호출한다. Facade 전체를 transaction으로 감싸지 않아 접수 커밋과 Redis afterCommit 반영 후 조회하는 기존 경계를 유지한다. 단순 조회와 Worker 진입은 각각 PurchaseWaitingQueryPortService·PurchaseWaitingWorkerPortService가 Port를 구현해 내부 UseCase로 연결한다. 조합이 없는 기능에 Facade를 일괄 추가하지 않는다.
+PurchaseWaitingCommandPortService가 접수 UseCase의 UUID를 받아 조회 UseCase를 호출한다. PortService 전체를 transaction으로 감싸지 않아 접수 commit과 Redis afterCommit 반영 후 조회하는 경계를 유지한다. 조회와 Worker 진입도 각각 PurchaseWaitingQueryPortService·PurchaseWaitingWorkerPortService가 맡는다. 별도 Facade는 두지 않으며 여러 UseCase를 사용해도 PortService 이름을 유지한다.
+
+Kafka Consumer → PurchaseWaitingReservationPort → PurchaseWaitingReservationPortService가 시작·처리·실패 기록 UseCase를 조율한다. 결과 확정 후에는 ReleasePurchaseWaitingSlotUseCase → ReleasePurchaseWaitingSlotService → PurchaseWaitingQueuePort로 슬롯을 반환한다. 이전 token의 반환은 새 슬롯에 영향을 주지 않으며, Redis 오류는 기록 후 복구에 맡긴다. 이 후처리를 DB transaction 안으로 옮기지 않는다. 관리자 재처리도 Aggregate 대신 내부 Result DTO를 반환해 PortService가 공개 응답으로 변환한다.
 
 같은 모듈의 Application 내부 업무 호출은 UseCase interface를 사용하고, 다른 모듈과 입력 Adapter는 Input Port를 호출한다. Aggregate 저장소 호출은 Domain Repository를, Redis·다른 모듈 기능 등 Application의 외부 기능 호출은 Output Port를 사용한다. Worker Port는 Scheduler의 코어 진입 계약이며 다른 모듈에 공개하는 api는 아니다.
 

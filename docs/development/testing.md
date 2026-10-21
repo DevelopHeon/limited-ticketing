@@ -70,16 +70,18 @@ python3 -m unittest discover -s observability/tests -p test_setup.py
 
 ## 아키텍처 검사 정책
 
-ArchUnit은 각 모듈 내부의 Domain·Application·입력/출력 Adapter와 DTO 의존 방향을 검사한다. Domain Repository는 Domain의 interface다. Input/Output Port와 내부 UseCase도 interface이며 각 구현은 Service·Facade·infrastructure에 둔다. 입력 Adapter는 Input Port를 호출하고 내부 UseCase를 우회하지 않는다. 출력 Adapter는 자신의 입력 Adapter나 업무 구현을 호출하지 않는다.
+ArchUnit은 각 모듈 내부의 Domain·Application·입력/출력 Adapter와 DTO 의존 방향을 검사한다. Domain Repository는 Domain의 interface다. Input/Output Port와 내부 UseCase도 interface이며 입력 구현은 PortService, 내부 업무 구현은 Service, 출력 구현은 infrastructure에 둔다. 입력 Adapter는 Input Port를 호출하고 내부 UseCase를 우회하지 않는다. 출력 Adapter는 자신의 입력 Adapter나 업무 구현을 호출하지 않는다.
 
-Input Port를 구현하는 PortService의 의존은 허용하지만, 내부 업무 Service가 자신의 Input Port·Facade를 역호출하는 것은 금지한다. 검사 대상은 운영 코드이며 테스트·생성 산출물은 제외한다. member·inventory처럼 HTTP/Scheduler 입력 Adapter가 없는 모듈에는 빈 입력 패키지를 강제하지 않는다. 나머지 필수 규칙은 대상이 없으면 실패한다. 모듈 간 공개 API·허용 의존·순환은 기존 Modulith 검증이 담당한다.
+Input Port 구현은 application/service의 PortService로 통일하며 facade 패키지는 금지한다. PortService는 내부 UseCase를 연결·조율하고 Repository·Output Port·구체 Service·Aggregate에 직접 의존하지 않는다. DTO 변환에 필요한 상태 enum은 허용한다. 내부 업무 Service는 자기 모듈의 Input Port나 구체 Service를 직접 호출하지 않고 내부 UseCase를 사용한다. 검사 대상은 운영 코드이며 테스트·생성 산출물은 제외한다. member·inventory처럼 HTTP/Scheduler 입력 Adapter가 없는 모듈에는 빈 입력 패키지를 강제하지 않는다. 나머지 필수 규칙은 대상이 없으면 실패한다. 모듈 간 공개 API·허용 의존·순환은 기존 Modulith 검증이 담당한다.
 
 규칙을 변경하면 정상 코드 통과와 대표 금지 의존성의 실패를 확인한다. 임시 위반은 원복하고 전체 `./gradlew check`를 실행한다. 검사 범위·허용 의존성을 완화하거나 실패를 비활성화해 통과시키지 않는다. 검사 적용·실행 상태는 [로드맵](../plans/roadmap.md)이 소유한다.
 
 ## 업무 회귀 기준
 
-접수 Facade에 전체 transaction을 추가하지 않는다. `PurchaseWaitingIntegrationTest.queuesRequestsIdempotentlyAndProcessesOnlyTheInventoryWinner`는 접수 응답에 Redis 등록 이후 순번 1·2가 포함되고 멱등 재전송 및 최종 예약·품절이 재고와 일치하는지 검증한다. Aggregate Repository와 Port를 옮겨도 기존 상태·수량·오류·부수효과 assert는 유지한다.
+접수·예약 PortService에 전체 transaction을 추가하지 않는다. `PurchaseWaitingIntegrationTest.queuesRequestsIdempotentlyAndProcessesOnlyTheInventoryWinner`는 접수 응답에 Redis 등록 이후 순번 1·2가 포함되고 멱등 재전송 및 최종 예약·품절이 재고와 일치하는지 검증한다. Aggregate Repository와 Port를 옮겨도 기존 상태·수량·오류·부수효과 assert는 유지한다.
 
 InventoryCommandServiceTest는 0 이하 예약 수량의 영속화 차단, 존재하지 않는 원장과 실제 품절의 오류 구분, 중복 초기화 시 수량 덮어쓰기 금지를 검증한다. 예약·결제·취소·만료의 실제 롤백과 동시성은 app 통합 테스트가 검증한다. 위임 횟수·DTO 접근자·클래스 존재만 확인하는 테스트는 늘리지 않는다.
 
 비동기 Outbox 단위 테스트는 미완료 Future·완료 콜백 대기까지의 In-flight 제한, 동시 polling, 동기/비동기 전송 실패, Claim 오류, 콜백 실행 거부, DB 완료/실패 기록 오류에서의 Permit 반환을 검증한다. 가변 Clock으로 지연 실패 후 backoff와 30초 상한을 유지하는지도 검사한다.
+
+슬롯 반환 분리의 회귀는 `PurchaseWaitingIntegrationTest.completedReservationSurvivesSlotReleaseFailure`가 검증한다. Redis 반환 실패에도 예약 결과와 재고를 보존하고 복구에서 슬롯만 제거하며 재전달 시 구매 효과가 중복되지 않는지 확인한다. 이전 token의 슬롯 반환도 새 슬롯을 제거할 수 없는지 내부 UseCase 경유로 검증한다.

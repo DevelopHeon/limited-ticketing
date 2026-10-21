@@ -22,15 +22,18 @@ import com.example.limitedticketing.purchase.domain.repository.PurchaseRepositor
 import com.example.limitedticketing.purchasewaiting.application.port.in.worker.PurchaseWaitingReservationPort;
 import com.example.limitedticketing.purchasewaiting.application.port.in.worker.PurchaseWaitingWorkerPort;
 import com.example.limitedticketing.purchasewaiting.application.port.in.worker.dto.ReservationJobInput;
+import com.example.limitedticketing.purchasewaiting.application.port.in.worker.dto.ReservationJobOutcome;
 import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingQueuePort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.dto.PurchaseWaitingClaim;
 import com.example.limitedticketing.purchasewaiting.application.service.DispatchPurchaseWaitingService;
 import com.example.limitedticketing.purchasewaiting.application.usecase.ClaimPurchaseWaitingUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.ProcessPurchaseWaitingUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.RecoverPurchaseWaitingUseCase;
+import com.example.limitedticketing.purchasewaiting.application.usecase.ReleasePurchaseWaitingSlotUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.StartPurchaseWaitingExecutionUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ClaimPurchaseWaitingCommand;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ProcessPurchaseWaitingCommand;
+import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ReleasePurchaseWaitingSlotCommand;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ReservationExecutionCommand;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingEntry;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingStatus;
@@ -144,6 +147,8 @@ class PurchaseWaitingIntegrationTest {
     private PurchaseWaitingReservationPort purchaseWaitingReservationPort;
     @Autowired
     private StartPurchaseWaitingExecutionUseCase startPurchaseWaitingExecutionUseCase;
+    @Autowired
+    private ReleasePurchaseWaitingSlotUseCase releasePurchaseWaitingSlotUseCase;
 
     @Autowired
     private PlatformTransactionManager transactions;
@@ -490,6 +495,31 @@ class PurchaseWaitingIntegrationTest {
     }
 
     @Test
+    @DisplayName("예약 확정 후 Redis 슬롯 반환이 실패해도 구매와 재고를 보존하고 복구 시 슬롯만 정리한다")
+    void completedReservationSurvivesSlotReleaseFailure() throws Exception {
+        Fixture fixture = createFixture(1);
+        QueueEntry entry = enqueue(fixture.saleProductId(), fixture.firstMemberId(), issuePurchaseKey(fixture.firstMemberId()));
+        purchaseWaitingWorkerPort.dispatchWaitingEntries();
+        ReservationJobInput input = jobInput(entry.id());
+        doThrow(new RedisConnectionFailureException("슬롯 반환 실패"))
+            .doCallRealMethod().when(purchaseWaitingQueuePort)
+            .releaseProcessing(input.saleProductId(), input.waitingEntryId(), input.processingToken());
+
+        assertThat(purchaseWaitingReservationPort.execute(input)).isEqualTo(ReservationJobOutcome.COMPLETED);
+        assertThat(purchaseWaitingEntryRepository.findById(entry.id()).orElseThrow().getStatus()).isEqualTo(PurchaseWaitingStatus.RESERVED);
+        assertThat(stringRedisTemplate.opsForZSet().zCard("processing:sale:" + fixture.saleProductId())).isEqualTo(1);
+        assertThat(inventoryRepository.findById(fixture.inventoryId()).orElseThrow().getReservedQuantity()).isEqualTo(1);
+
+        recoverPurchaseWaitingUseCase.recover();
+        assertThat(stringRedisTemplate.opsForZSet().zCard("processing:sale:" + fixture.saleProductId())).isZero();
+        assertThat(purchaseWaitingReservationPort.execute(input)).isEqualTo(ReservationJobOutcome.COMPLETED);
+        assertThat(jdbcTemplate.queryForObject("select count(*) from purchases where sale_product_id = ?",
+            Long.class, fixture.saleProductId())).isEqualTo(1);
+        assertThat(inventoryRepository.findById(fixture.inventoryId()).orElseThrow().getReservedQuantity()).isEqualTo(1);
+        assertThat(purchaseWaitingEntryRepository.findById(entry.id()).orElseThrow().getExecutionAttempts()).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("만료된 이전 Worker는 새 시도의 슬롯을 해제하거나 구매를 중복 예약할 수 없다")
     void staleWorkerCannotReleaseOrRequeueTheNewAttempt() throws Exception {
         Fixture fixture = createFixture(1);
@@ -505,7 +535,7 @@ class PurchaseWaitingIntegrationTest {
         claimPurchaseWaitingUseCase.claim(new ClaimPurchaseWaitingCommand(entry.id(), second.token())).orElseThrow();
 
         assertThat(processPurchaseWaitingUseCase.process(new ProcessPurchaseWaitingCommand(entry.id(), first.token()))).isEmpty();
-        purchaseWaitingQueuePort.releaseProcessing(fixture.saleProductId(), entry.id(), first.token());
+        releasePurchaseWaitingSlotUseCase.release(new ReleasePurchaseWaitingSlotCommand(fixture.saleProductId(), entry.id(), first.token()));
         purchaseWaitingQueuePort.requeue(waiting, first.token());
 
         assertThat(purchaseWaitingEntryRepository.findById(entry.id()).orElseThrow().getProcessingToken()).isEqualTo(second.token());
@@ -515,7 +545,7 @@ class PurchaseWaitingIntegrationTest {
             Long.class, fixture.saleProductId())).isZero();
         startDispatchedEntries();
         PurchaseWaitingEntry completed = processPurchaseWaitingUseCase.process(new ProcessPurchaseWaitingCommand(entry.id(), second.token())).orElseThrow();
-        purchaseWaitingQueuePort.releaseProcessing(completed);
+        releasePurchaseWaitingSlotUseCase.release(new ReleasePurchaseWaitingSlotCommand(fixture.saleProductId(), entry.id(), second.token()));
         assertThat(completed.getStatus()).isEqualTo(PurchaseWaitingStatus.RESERVED);
         assertThat(inventoryRepository.findById(fixture.inventoryId()).orElseThrow().getReservedQuantity()).isEqualTo(1);
     }

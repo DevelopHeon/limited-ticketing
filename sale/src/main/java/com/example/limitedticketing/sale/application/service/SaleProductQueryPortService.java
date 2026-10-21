@@ -6,8 +6,6 @@ import com.example.limitedticketing.sale.application.port.in.dto.FindSaleProduct
 import com.example.limitedticketing.sale.application.port.in.dto.SaleProductDetail;
 import com.example.limitedticketing.sale.application.port.in.dto.SaleProductPage;
 import com.example.limitedticketing.sale.application.port.in.dto.SaleProductSummary;
-import com.example.limitedticketing.sale.application.port.out.dto.SaleProductSort;
-import com.example.limitedticketing.sale.application.port.out.dto.SortDirection;
 import com.example.limitedticketing.sale.application.usecase.FindSaleProductDetailUseCase;
 import com.example.limitedticketing.sale.application.usecase.FindSaleProductsUseCase;
 import com.example.limitedticketing.sale.application.usecase.SaleProductExistsUseCase;
@@ -65,8 +63,8 @@ public class SaleProductQueryPortService implements SaleProductQueryPort {
                 input.status() == null ? null : SaleStatus.fromRequestValue(input.status()),
                 input.page(),
                 input.size(),
-                SaleProductSort.fromRequestProperty(input.sortProperty()),
-                SortDirection.fromRequestDirection(input.direction())
+                input.sortProperty(),
+                input.direction()
             )
         );
         return SaleProductPage.of(

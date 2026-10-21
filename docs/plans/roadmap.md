@@ -11,6 +11,7 @@
 - 사용자가 별도로 요청한 Outbox 비동기 리팩토링은 `d3088f4` commit/push·Notion 기록을 마쳤다. Kafka 조정 값의 YAML 이동과 사용자가 수정한 Outbox Scheduler 설정 키도 후속 변경으로 구현·검증·독립 리뷰를 마쳤다. 한국어 commit/push와 기존 Notion 기록 갱신 후 사용자 검토를 기다린다.
 - 다음 단계는 사용자의 명시적인 시작 요청 후 논의한다. 4단계 캐시를 자동 시작하지 않는다.
 - Publisher는 기존 `ReservationOutboxMessage`를 받는 계약으로 정리했다. Consumer의 계약 DTO 자동 변환은 검토 후 보류했으며 문자열 수신·검증·DLT 경로를 유지한다. `./gradlew check :app:bootJar --continue`에서 Java 256개 테스트와 아키텍처·컨벤션 검사 및 빌드가 통과했다. 독립 리뷰에서도 결함이 발견되지 않았으며 한국어 commit/push와 기존 Notion 기록 갱신 후 사용자 검토를 기다린다.
+- 진입 구현을 PortService로 통합하고 Facade를 제거했다. PortService의 Output Port·Repository·구현 Service 직접 호출 금지는 유지하며, 슬롯 반환은 내부 UseCase로 분리했다. 현재 구조와 호출 그림은 [모듈 설계](../architecture/module-boundaries.md#호출-흐름과-의존-방향), 선택 이유·비용은 [ADR 0008 변경 결정](../adr/0008-application-entry-orchestration.md#진입-구현-통합--2026-10-21)을 따른다. 전체 검사·빌드와 독립 리뷰를 마쳤고 발견된 결함은 없다. 한국어 commit/push와 기존 Notion 기록 갱신 후 사용자 검토를 기다린다.
 
 ## 단계별 진행
 
@@ -27,6 +28,8 @@
 | 7. 종합 부하·학습 정리 | 미착수 | 집중·분산·조회·폭주·지속 평가 |
 
 ## 다음 검증
+
+진입 구현 통합의 기준 revision은 `4403c71a7bb90fe9c53e6efd73e664fc72aa9764`이며 작업 시작 시 미커밋 변경은 없었다. 새 의존성 검사와 기존 Facade·Aggregate 사용의 실패를 먼저 확인했다. Repository·Output Port·구현 Service를 임시 주입해 차단됨을 확인하고 원복했다. Service 간 의존 검사의 최초 조건이 내부 record·commit 콜백까지 다른 Service로 분류해 실패한 것은 실제 Service 구현 간 의존 검사로 분리해 수정했으며 기존 역방향 의존 검사는 유지했다. 수정 후 `./gradlew check :app:bootJar --continue`가 Java 281개 테스트에 실패·오류·skip 없이 통과했다. 예약 확정 후 Redis 반환 실패·복구·중복 구매 방지와 이전 token의 슬롯 보호를 검증했다. 문서 상대 링크·앵커 315개, Bash 구문 59개와 Mermaid 15개 렌더링을 확인했다. Archive·과거 평가·측정 원본은 수정하지 않았고 별도 부하는 재실행하지 않았다.
 
 후속 리팩토링 기준 revision은 `b5b09ee6dc8aee4a787e8720b9d71b1acc715433`다. 시작 시 미커밋 변경은 없었다. `./gradlew check :app:bootJar --continue`가 Java 253개 테스트에 실패·오류·skip 없이 통과했다. ArchUnit·Modulith·Checkstyle을 포함한다. Worker의 비-interface Port와 Domain을 노출한 DTO를 임시 주입해 각각 검사 실패를 확인했고 원복 후 전체 검사를 통과했다.
 

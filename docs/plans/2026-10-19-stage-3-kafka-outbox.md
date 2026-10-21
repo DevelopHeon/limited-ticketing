@@ -6,6 +6,8 @@
 
 최초 구현은 `b5b09ee`에 보존한다. 이후 사용자가 별도로 요청한 비동기 발행·Claim/Lease 경계는 [현재 설계](../architecture/purchase-waiting.md#outbox-비동기-발행-경계)와 [ADR 0011](../adr/0011-asynchronous-outbox-claim-lease.md)을 따른다. 아래의 최초 인수 조건과 당시 평가는 후속 성능 실측으로 해석하지 않는다.
 
+아래 Facade 명칭은 승인 당시의 구분이다. 후속 [진입 구현 통합 결정](../adr/0008-application-entry-orchestration.md#진입-구현-통합--2026-10-21)으로 PortService에 통합했고, 현재 클래스와 호출 방향은 [모듈 설계](../architecture/module-boundaries.md#호출-흐름과-의존-방향)를 따른다.
+
 Redis ZSET의 입장 선택과 실제 예약 실행 사이를 Kafka로 연결한다. DB 상태 변경 후 프로세스가 종료되더라도 전달할 작업이 남아야 하며, 중복 발행·재소비가 구매와 재고에 중복 효과를 만들지 않아야 한다. partition·offset·consumer group·복제와 장애 복구를 직접 확인한다. Kafka 도입 자체를 지연 개선의 근거로 사용하지 않는다.
 
 포함:
@@ -144,7 +146,7 @@ DISPATCHED의 수동 재전달은 실행 횟수를 초기화하지 않는다. �
 
 ## 7. 코드 경계와 실행 역할
 
-현재 [PortService·Facade·Service 구조](../architecture/module-boundaries.md#레이어-구조)를 따른다.
+아래 배치는 3단계 승인 당시의 PortService·Facade·Service 구분이다. 후속 결정으로 Facade는 PortService로 통합했고 슬롯 반환도 내부 UseCase로 분리했다. 당시 업무·transaction 계약은 유지하며 현재 구현은 [모듈 구조](../architecture/module-boundaries.md#레이어-구조)와 [ADR 0008 변경 결정](../adr/0008-application-entry-orchestration.md#진입-구현-통합--2026-10-21)을 따른다.
 
 | 책임 | 위치 |
 |---|---|

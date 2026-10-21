@@ -1,37 +1,36 @@
-package com.example.limitedticketing.purchasewaiting.application.facade;
+package com.example.limitedticketing.purchasewaiting.application.service;
 
 import com.example.limitedticketing.purchasewaiting.application.port.in.worker.PurchaseWaitingReservationPort;
 import com.example.limitedticketing.purchasewaiting.application.port.in.worker.dto.ReservationJobInput;
 import com.example.limitedticketing.purchasewaiting.application.port.in.worker.dto.ReservationJobOutcome;
-import com.example.limitedticketing.purchasewaiting.application.port.out.PurchaseWaitingQueuePort;
 import com.example.limitedticketing.purchasewaiting.application.usecase.ProcessPurchaseWaitingUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.RecordPurchaseWaitingFailureUseCase;
+import com.example.limitedticketing.purchasewaiting.application.usecase.ReleasePurchaseWaitingSlotUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.StartPurchaseWaitingExecutionUseCase;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ProcessPurchaseWaitingCommand;
+import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ReleasePurchaseWaitingSlotCommand;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.command.ReservationExecutionCommand;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.result.ReservationAttemptStart;
 import com.example.limitedticketing.purchasewaiting.application.usecase.dto.result.ReservationExecutionResult;
-import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingEntry;
-import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
-public class PurchaseWaitingReservationFacade implements PurchaseWaitingReservationPort {
-    private static final Logger log = LoggerFactory.getLogger(PurchaseWaitingReservationFacade.class);
+public class PurchaseWaitingReservationPortService implements PurchaseWaitingReservationPort {
+    private static final Logger log = LoggerFactory.getLogger(PurchaseWaitingReservationPortService.class);
     private final StartPurchaseWaitingExecutionUseCase startPurchaseWaitingExecutionUseCase;
     private final ProcessPurchaseWaitingUseCase processPurchaseWaitingUseCase;
     private final RecordPurchaseWaitingFailureUseCase recordPurchaseWaitingFailureUseCase;
-    private final PurchaseWaitingQueuePort purchaseWaitingQueuePort;
+    private final ReleasePurchaseWaitingSlotUseCase releasePurchaseWaitingSlotUseCase;
 
-    public PurchaseWaitingReservationFacade(StartPurchaseWaitingExecutionUseCase startPurchaseWaitingExecutionUseCase,
+    public PurchaseWaitingReservationPortService(StartPurchaseWaitingExecutionUseCase startPurchaseWaitingExecutionUseCase,
         ProcessPurchaseWaitingUseCase processPurchaseWaitingUseCase, RecordPurchaseWaitingFailureUseCase recordPurchaseWaitingFailureUseCase,
-        PurchaseWaitingQueuePort purchaseWaitingQueuePort) {
+        ReleasePurchaseWaitingSlotUseCase releasePurchaseWaitingSlotUseCase) {
         this.startPurchaseWaitingExecutionUseCase = startPurchaseWaitingExecutionUseCase;
         this.processPurchaseWaitingUseCase = processPurchaseWaitingUseCase;
         this.recordPurchaseWaitingFailureUseCase = recordPurchaseWaitingFailureUseCase;
-        this.purchaseWaitingQueuePort = purchaseWaitingQueuePort;
+        this.releasePurchaseWaitingSlotUseCase = releasePurchaseWaitingSlotUseCase;
     }
 
     @Override
@@ -47,34 +46,29 @@ public class PurchaseWaitingReservationFacade implements PurchaseWaitingReservat
         if (start == ReservationAttemptStart.EXHAUSTED) {
             return finishFailure(command);
         }
-        Optional<PurchaseWaitingEntry> completed;
+        boolean completed;
         try {
-            completed = processPurchaseWaitingUseCase.process(new ProcessPurchaseWaitingCommand(input.waitingEntryId(), input.processingToken()));
+            completed = processPurchaseWaitingUseCase.process(new ProcessPurchaseWaitingCommand(input.waitingEntryId(), input.processingToken())).isPresent();
         } catch (RuntimeException exception) {
             log.warn("Reservation execution failed for entry {}", input.waitingEntryId(), exception);
             return finishFailure(command);
         }
-        completed.ifPresent(this::release);
+        if (completed) {
+            release(command);
+        }
         return ReservationJobOutcome.COMPLETED;
     }
 
     private ReservationJobOutcome finishFailure(ReservationExecutionCommand command) {
         ReservationExecutionResult result = recordPurchaseWaitingFailureUseCase.record(command);
         if (result == ReservationExecutionResult.COMPLETED) {
-            try {
-                purchaseWaitingQueuePort.releaseProcessing(command.saleProductId(), command.waitingEntryId(), command.processingToken());
-            } catch (RuntimeException exception) {
-                log.warn("Redis slot release deferred for entry {}", command.waitingEntryId(), exception);
-            }
+            release(command);
         }
         return ReservationJobOutcome.valueOf(result.name());
     }
 
-    private void release(PurchaseWaitingEntry entry) {
-        try {
-            purchaseWaitingQueuePort.releaseProcessing(entry);
-        } catch (RuntimeException exception) {
-            log.warn("Redis slot release deferred for entry {}", entry.getId(), exception);
-        }
+    private void release(ReservationExecutionCommand command) {
+        releasePurchaseWaitingSlotUseCase.release(new ReleasePurchaseWaitingSlotCommand(
+            command.saleProductId(), command.waitingEntryId(), command.processingToken()));
     }
 }

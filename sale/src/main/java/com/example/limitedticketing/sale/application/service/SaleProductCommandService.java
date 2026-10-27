@@ -1,6 +1,7 @@
 package com.example.limitedticketing.sale.application.service;
 
 import com.example.limitedticketing.sale.application.port.out.InventoryInitializationPort;
+import com.example.limitedticketing.sale.application.port.out.SaleProductReadCachePort;
 import com.example.limitedticketing.sale.application.usecase.ChangeSalePeriodUseCase;
 import com.example.limitedticketing.sale.application.usecase.CloseSaleProductUseCase;
 import com.example.limitedticketing.sale.application.usecase.CreateSaleProductUseCase;
@@ -18,8 +19,12 @@ import com.example.limitedticketing.shared.vo.Money;
 import com.example.limitedticketing.shared.vo.SalePeriod;
 import java.time.Clock;
 import java.time.LocalDateTime;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 public class SaleProductCommandService implements
@@ -28,21 +33,25 @@ public class SaleProductCommandService implements
     OpenSaleProductUseCase,
     CloseSaleProductUseCase {
 
+    private static final Logger LOG = LoggerFactory.getLogger(SaleProductCommandService.class);
     private final ProductRepository productRepository;
     private final SaleProductRepository saleProductRepository;
     private final InventoryInitializationPort inventoryInitializationPort;
     private final Clock clock;
+    private final SaleProductReadCachePort saleProductReadCachePort;
 
     public SaleProductCommandService(
         ProductRepository productRepository,
         SaleProductRepository saleProductRepository,
         InventoryInitializationPort inventoryInitializationPort,
-        Clock clock
+        Clock clock,
+        SaleProductReadCachePort saleProductReadCachePort
     ) {
         this.productRepository = productRepository;
         this.saleProductRepository = saleProductRepository;
         this.inventoryInitializationPort = inventoryInitializationPort;
         this.clock = clock;
+        this.saleProductReadCachePort = saleProductReadCachePort;
     }
 
     @Transactional
@@ -57,6 +66,7 @@ public class SaleProductCommandService implements
             saleProduct.getId(), command.initialInventoryQuantity()
         );
 
+        invalidateCacheAfterCommit();
         return SaleProductCommandResult.from(saleProduct);
     }
 
@@ -65,7 +75,9 @@ public class SaleProductCommandService implements
         SaleProduct saleProduct = saleProductRepository.getRequiredById(command.saleProductId());
         saleProduct.changeSalePeriod(SalePeriod.of(command.saleStartsAt(), command.saleEndsAt()));
 
-        return SaleProductCommandResult.from(saleProductRepository.save(saleProduct));
+        SaleProduct saved = saleProductRepository.save(saleProduct);
+        invalidateCacheAfterCommit();
+        return SaleProductCommandResult.from(saved);
     }
 
     @Transactional
@@ -73,7 +85,9 @@ public class SaleProductCommandService implements
         SaleProduct saleProduct = saleProductRepository.getRequiredById(command.saleProductId());
         saleProduct.open(LocalDateTime.now(clock));
 
-        return SaleProductCommandResult.from(saleProductRepository.save(saleProduct));
+        SaleProduct saved = saleProductRepository.save(saleProduct);
+        invalidateCacheAfterCommit();
+        return SaleProductCommandResult.from(saved);
     }
 
     @Transactional
@@ -81,7 +95,29 @@ public class SaleProductCommandService implements
         SaleProduct saleProduct = saleProductRepository.getRequiredById(command.saleProductId());
         saleProduct.close();
 
-        return SaleProductCommandResult.from(saleProductRepository.save(saleProduct));
+        SaleProduct saved = saleProductRepository.save(saleProduct);
+        invalidateCacheAfterCommit();
+        return SaleProductCommandResult.from(saved);
     }
 
+    private void invalidateCacheAfterCommit() {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    invalidateCache();
+                }
+            });
+        } else {
+            invalidateCache();
+        }
+    }
+
+    private void invalidateCache() {
+        try {
+            saleProductReadCachePort.invalidate();
+        } catch (RuntimeException exception) {
+            LOG.warn("판매 변경 commit 후 캐시 무효화 실패: TTL로 복구", exception);
+        }
+    }
 }

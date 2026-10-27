@@ -9,7 +9,7 @@
 - 3단계(`b5b09ee` commit/push·Notion 기록 완료): [승인된 스펙](2026-10-19-stage-3-kafka-outbox.md)의 Kafka·Outbox·실행 예산·관리자 재처리·API/Worker 역할 분리와 현재 문서를 구현했다. Outbox SQL은 JdbcRepository로 분리했고 운영 구독자가 없던 Spring 구매 예약 이벤트는 제거했다.
 - 필수 검사와 작은 전달·복구 실험, 독립 리뷰·결함 수정·재리뷰를 마쳤다. 실행 중 중복은 ACK하지 않고 재전달하며 발행 backoff는 실제 실패 시점부터 계산한다.
 - 사용자가 별도로 요청한 Outbox 비동기 리팩토링은 `d3088f4` commit/push·Notion 기록을 마쳤다. Kafka 조정 값의 YAML 이동과 사용자가 수정한 Outbox Scheduler 설정 키도 후속 변경으로 구현·검증·독립 리뷰를 마쳤다. 한국어 commit/push와 기존 Notion 기록 갱신 후 사용자 검토를 기다린다.
-- 다음 단계는 사용자의 명시적인 시작 요청 후 논의한다. 4단계 캐시를 자동 시작하지 않는다.
+- 사용자가 [4단계 스펙](2026-10-27-stage-4-product-read-cache.md)을 승인했다. 표시 Cache-Aside·조회 Redis 분리·무효화·동시 miss와 목록 일괄 조회를 구현했다. Java 318개·Python 25개·Node 8개 검사와 [작은 cold/warm·TTL·재시작 실험](../evaluations/load-testing/2026-10-27-stage-4-product-read-cache.md)을 마쳤다. 독립 리뷰에서 확정 결함은 발견되지 않았다. 한국어 commit/push와 Notion 기록 후 사용자 검토를 기다리며 5단계는 시작하지 않는다.
 - Publisher는 기존 `ReservationOutboxMessage`를 받는 계약으로 정리했다. Consumer의 계약 DTO 자동 변환은 검토 후 보류했으며 문자열 수신·검증·DLT 경로를 유지한다. `./gradlew check :app:bootJar --continue`에서 Java 256개 테스트와 아키텍처·컨벤션 검사 및 빌드가 통과했다. 독립 리뷰에서도 결함이 발견되지 않았으며 한국어 commit/push와 기존 Notion 기록 갱신 후 사용자 검토를 기다린다.
 - 진입 구현을 PortService로 통합하고 Facade를 제거했다. PortService의 Output Port·Repository·구현 Service 직접 호출 금지는 유지하며, 슬롯 반환은 내부 UseCase로 분리했다. 현재 구조와 호출 그림은 [모듈 설계](../architecture/module-boundaries.md#호출-흐름과-의존-방향), 선택 이유·비용은 [ADR 0008 변경 결정](../adr/0008-application-entry-orchestration.md#진입-구현-통합--2026-10-21)을 따른다. 전체 검사·빌드와 독립 리뷰를 마쳤고 발견된 결함은 없다. 한국어 commit/push와 기존 Notion 기록 갱신 후 사용자 검토를 기다린다.
 
@@ -24,7 +24,7 @@
 | 전체 모듈 구조·명명·문서 정리 | 완료 | [모듈 설계](../architecture/module-boundaries.md), [ADR 0008](../adr/0008-application-entry-orchestration.md), [ADR 0009](../adr/0009-domain-repository-ownership.md) |
 | 3. Kafka·Outbox 예약 전달 | 구현·검증·리뷰 완료 | [인수 계약](2026-10-19-stage-3-kafka-outbox.md), [3단계 실험](../evaluations/load-testing/2026-10-19-stage-3-kafka-outbox.md) |
 | 3단계 후속 · 비동기 Outbox | 구현·검증·리뷰 완료 | [발행 경계](../architecture/purchase-waiting.md#outbox-비동기-발행-경계), [ADR 0011](../adr/0011-asynchronous-outbox-claim-lease.md) |
-| 4. 상품 조회 캐시 | 미착수 | 상세/목록 캐시·무효화·동시 miss 제어·cold/warm 비교 |
+| 4. 상품 조회 캐시 | 구현·검증·독립 리뷰 완료, 사용자 검토 대기 | [인수 계약](2026-10-27-stage-4-product-read-cache.md), [실측과 한계](../evaluations/load-testing/2026-10-27-stage-4-product-read-cache.md) |
 | 5. 인기·판매 랭킹 | 미착수 | 일간/7일 집계·ZSET·상품 캐시 결합·복원 |
 | 6. 다중 프로세스·장애 복구 | 미착수 | Consumer/Broker/Redis/DB 장애와 복구 검증 |
 | 7. 종합 부하·학습 정리 | 미착수 | 집중·분산·조회·폭주·지속 평가 |

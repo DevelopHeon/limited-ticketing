@@ -27,9 +27,11 @@ flowchart TB
         worker["Worker · 같은 실행 산출물<br/>Dispatcher·Outbox Publisher·Consumer·복구"]
         db[("PostgreSQL 17<br/>업무 원장·예약 Outbox")]
         redis[("Redis 7<br/>waiting / processing ZSET·token")]
+        readRedis[("조회 Redis 7<br/>상품 상세·목록 캐시")]
         kafka[("Kafka<br/>예약 요청·DLT")]
         api -->|"업무 transaction"| db
         api -->|"입구 보호·위치·등록"| redis
+        api -->|"표시 조회·무효화"| readRedis
         worker -->|"입장·실행·복구·Outbox transaction"| db
         worker -->|"claim·복원·슬롯 반환"| redis
         worker -->|"Outbox 발행"| kafka
@@ -50,6 +52,7 @@ PostgreSQL이 구매·재고·대기 요청의 최종 상태와 Outbox를 소유
 | 구현 기능과 HTTP·대기·예약·결제·복구의 호출 순서 | [주요 시퀀스](business-flows.md) |
 | 실제 로컬 프로세스와 Docker 배치 | [Deployment](deployment.md) |
 | 대기 처리 내부 구성·상태·복구 | [구매 대기 설계](purchase-waiting.md#c3--구매-대기-컴포넌트) |
+| 표시 캐시·TTL·무효화·DB 업무 판정 분리 | [상품 조회 캐시](product-read-cache.md) |
 | 왜 이 구조와 저장소 경계를 선택했는가 | [ADR 목록](../adr/README.md) |
 | 실행 방법과 검증 책임 | [개발 안내](../development/README.md), [테스트 기준](../development/testing.md) |
 | 앞으로 확장할 조건 | [로드맵](../plans/roadmap.md) |

@@ -17,6 +17,7 @@
 - Redis ZSET 기반 상품별 대기열과 비동기 예약 처리
 - DB와 Redis 불일치 및 중단된 처리 항목 복구
 - Transactional Outbox·Kafka 예약 전달과 중복 소비 방어·관리자 재처리
+- 조회 전용 Redis의 상품 상세·목록 캐시와 commit 후 무효화·동시 miss 제어
 - Spring Modulith를 이용한 모듈 경계 검증 및 문서 생성
 - Testcontainers PostgreSQL/Redis/Kafka 기반 통합 및 동시성 테스트
 - k6 기반 판매 오픈 부하 테스트
@@ -34,7 +35,7 @@
 | Language | Java 17 |
 | Framework | Spring Boot 3.5, Spring Modulith 1.4 |
 | Persistence | Spring Data JPA, JdbcTemplate, PostgreSQL 17, Flyway |
-| Queue | Redis 7, ZSET, Lua Script, Kafka 4.2, Spring Kafka |
+| Queue / Cache | Redis 7, ZSET·Lua·상품 표시 캐시, Kafka 4.2, Spring Kafka |
 | Security | Spring Security, 로컬 테스트용 Header 인증 |
 | Test | JUnit 5, Spring Boot Test, Testcontainers, Spring Modulith Test |
 | Load Test | k6 |

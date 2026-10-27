@@ -9,6 +9,7 @@ import com.example.limitedticketing.sale.application.port.in.dto.SaleProductSumm
 import com.example.limitedticketing.sale.application.usecase.FindSaleProductDetailUseCase;
 import com.example.limitedticketing.sale.application.usecase.FindSaleProductsUseCase;
 import com.example.limitedticketing.sale.application.usecase.SaleProductExistsUseCase;
+import com.example.limitedticketing.sale.application.usecase.IsSaleProductClosedUseCase;
 import com.example.limitedticketing.sale.application.usecase.dto.query.FindSaleProductQuery;
 import com.example.limitedticketing.sale.application.usecase.dto.query.FindSaleProductsQuery;
 import com.example.limitedticketing.sale.application.usecase.dto.result.SaleProductDetailResult;
@@ -22,15 +23,18 @@ public class SaleProductQueryPortService implements SaleProductQueryPort {
     private final FindSaleProductDetailUseCase findSaleProductDetailUseCase;
     private final SaleProductExistsUseCase saleProductExistsUseCase;
     private final FindSaleProductsUseCase findSaleProductsUseCase;
+    private final IsSaleProductClosedUseCase isSaleProductClosedUseCase;
 
     public SaleProductQueryPortService(
         FindSaleProductDetailUseCase findSaleProductDetailUseCase,
         SaleProductExistsUseCase saleProductExistsUseCase,
-        FindSaleProductsUseCase findSaleProductsUseCase
+        FindSaleProductsUseCase findSaleProductsUseCase,
+        IsSaleProductClosedUseCase isSaleProductClosedUseCase
     ) {
         this.findSaleProductDetailUseCase = findSaleProductDetailUseCase;
         this.saleProductExistsUseCase = saleProductExistsUseCase;
         this.findSaleProductsUseCase = findSaleProductsUseCase;
+        this.isSaleProductClosedUseCase = isSaleProductClosedUseCase;
     }
 
     public SaleProductDetail findDetail(FindSaleProductInput input) {
@@ -49,8 +53,7 @@ public class SaleProductQueryPortService implements SaleProductQueryPort {
     }
 
     public boolean isClosed(FindSaleProductInput input) {
-        return findSaleProductDetailUseCase.findDetail(new FindSaleProductQuery(input.saleProductId())).status()
-            == SaleStatus.CLOSED;
+        return isSaleProductClosedUseCase.isClosed(new FindSaleProductQuery(input.saleProductId()));
     }
 
     public boolean exists(FindSaleProductInput input) {

@@ -45,6 +45,19 @@ spring:
         enabled: false
 
 limited-ticketing:
+  sale-cache:
+    enabled: ${SALE_CACHE_ENABLED:true}
+    detail-ttl-ms: ${SALE_CACHE_DETAIL_TTL_MS:30000}
+    list-ttl-ms: ${SALE_CACHE_LIST_TTL_MS:10000}
+    jitter-percent: 10
+    lock-lease-ms: 2000
+    wait-timeout-ms: 200
+    poll-interval-ms: 25
+    redis:
+      host: ${READ_REDIS_HOST:localhost}
+      port: ${READ_REDIS_PORT:6380}
+      connect-timeout-ms: 200
+      command-timeout-ms: 100
   kafka:
     reservation-topic: limited-ticketing.purchasewaiting.reservation.v1
     dead-letter-topic: limited-ticketing.purchasewaiting.reservation.v1-dlt

@@ -17,5 +17,6 @@ ADR 0001–0004는 **2026-10-15에 기존 구현과 문서를 근거로 회고 �
 | [0009](0009-domain-repository-ownership.md) | Accepted | Aggregate 영속성은 Domain Repository, 검색·외부 기능은 Application Output Port |
 | [0010](0010-kafka-reservation-outbox.md) | Accepted | 예약 상태와 Outbox 원자 저장·Kafka 전달·업무 멱등성·API/Worker 역할 |
 | [0011](0011-asynchronous-outbox-claim-lease.md) | Accepted | 짧은 Outbox Claim/Lease·비동기 Kafka 발행·제한된 완료 콜백 |
+| [0012](0012-product-read-cache.md) | Accepted | 별도 조회 Redis·표시 Cache-Aside·세대 무효화·DB 업무 판정 분리 |
 
 진행 중인 도입 후보는 [로드맵](../plans/roadmap.md)에 둔다. Kafka·Outbox는 ADR 0010을 따르며, 독립 서비스 분리는 도입하지 않는다. 완료 스펙 원문은 [보관본](../archive/specs/2026-10-15-purchase-waiting-implementation.md)에서 확인한다.

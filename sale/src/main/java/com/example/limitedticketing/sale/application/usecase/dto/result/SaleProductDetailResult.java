@@ -1,6 +1,7 @@
 package com.example.limitedticketing.sale.application.usecase.dto.result;
 
 import com.example.limitedticketing.sale.domain.model.Product;
+import com.example.limitedticketing.sale.application.port.out.dto.CachedSaleProductDetail;
 import com.example.limitedticketing.sale.domain.model.SaleProduct;
 import com.example.limitedticketing.sale.domain.model.SaleStatus;
 import com.example.limitedticketing.shared.vo.Money;
@@ -26,5 +27,14 @@ public record SaleProductDetailResult(
             saleProduct.getSalePeriod().getEndsAt(),
             saleProduct.getStatus()
         );
+    }
+
+    public CachedSaleProductDetail toCacheValue() {
+        return new CachedSaleProductDetail(saleProductId, productName, benefitDescription, salePrice, saleStartsAt, saleEndsAt, status);
+    }
+
+    public static SaleProductDetailResult fromCache(CachedSaleProductDetail value) {
+        return new SaleProductDetailResult(value.saleProductId(), value.productName(), value.benefitDescription(),
+            value.salePrice(), value.saleStartsAt(), value.saleEndsAt(), value.status());
     }
 }

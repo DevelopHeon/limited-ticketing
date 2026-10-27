@@ -6,7 +6,7 @@
 
 | 기능 | 현재 동작 | 관련 흐름 |
 |---|---|---|
-| 판매 관리·조회 | 상품·판매·초기 재고 생성, 판매 기간 변경, OPEN/CLOSED 전이, 목록 필터·정렬·페이지 및 상세 DB 조회 | [판매 준비와 조회](#판매-준비와-조회) |
+| 판매 관리·조회 | 상품·판매·초기 재고 생성, 기간·상태 변경, 상세·목록 표시 캐시와 DB 업무 판정 분리 | [판매 준비와 조회](#판매-준비와-조회), [캐시 시퀀스](product-read-cache.md#읽기와-commit-후-무효화) |
 | 회원·요청 식별 | 회원 구매 가능 상태·소유권 검사, 구매/결제용 요청 키 발급, DB 유니크 제약으로 재요청 중복 방어 | [대기 접수와 조회](#대기-접수와-조회), [결제](#결제) |
 | 구매 대기 | 모든 기본 구매 진입에 DB 원장·순번 저장, Redis ZSET 순서·슬롯, 속도·수용량 제한, 결과 조회 | [대기 접수와 조회](#대기-접수와-조회) |
 | 예약 전달 | 입장 상한 확인, DISPATCHED와 Outbox 원자 저장, Claim/Lease·Future 기반 Kafka 발행 | [입장과 Outbox 발행](#입장과-outbox-발행) |
@@ -16,7 +16,7 @@
 | 내결함성 | Redis 원장 재구성, 만료 실행 복구, 기술 오류 실행 예산·DLT, 관리자 명시 재처리 | [자동 복구](#자동-복구), [관리자 재처리](#관리자-재처리) |
 | 관측·검증 | Actuator·Micrometer·Prometheus/Grafana, 전달 지연 경고, 업무·통합·아키텍처 검사, k6 도구 | [개발 안내](../development/README.md), [부하 테스트](../performance/load-testing.md) |
 
-별도 화면·외부 PG 호출은 없다. 결제 승인·실패는 HTTP API로 입력한다. 상품 조회는 PostgreSQL을 사용하며 상품 캐시나 인기·판매 랭킹을 조회하는 경로는 없다. 다음 작업과 미검증 범위는 [로드맵](../plans/roadmap.md)에서 관리한다.
+별도 화면·외부 PG 호출은 없다. 결제 승인·실패는 HTTP API로 입력한다. 상품 표시 조회는 캐시를 사용하며 실제 구매·재고 판정은 PostgreSQL이 담당한다. 인기·판매 랭킹은 아직 구현하지 않았다. 다음 작업과 미검증 범위는 [로드맵](../plans/roadmap.md)에서 관리한다.
 
 ## 그림을 읽는 기준
 
@@ -36,12 +36,14 @@ sequenceDiagram
     participant Sale as sale
     participant Inventory as inventory
     participant DB as PostgreSQL
+    participant Cache as 조회 Redis
     actor Buyer as 구매자
     Admin->>Sale: 판매 생성 HTTP
     Sale->>DB: 상품·DRAFT 판매 저장
     Sale->>Inventory: 초기 재고 생성
     Inventory->>DB: available 초기화
     Note over Sale,DB: 상품·판매·재고 생성 transaction commit
+    Sale->>Cache: afterCommit generation 무효화
     Sale-->>Admin: 판매 ID
     opt 판매 기간 변경
         Admin->>Sale: 판매 기간 변경 HTTP
@@ -51,12 +53,18 @@ sequenceDiagram
     Sale->>DB: 상태·기간 검증 후 OPEN 저장·commit
     Sale-->>Admin: 판매 상태
     Buyer->>Sale: 목록 또는 상세 조회 HTTP
-    Sale->>DB: 필터·정렬·페이지 또는 ID 조회
-    DB-->>Sale: 상품·판매 정보
+    Sale->>Cache: 표시 캐시 조회
+    alt miss 또는 캐시 장애
+        Sale->>DB: 필터·정렬·페이지 또는 ID 조회
+        DB-->>Sale: 상품·판매 정보
+        Sale->>Cache: 유효한 소유권·deadline이면 저장
+    else hit
+        Cache-->>Sale: 표시 정보
+    end
     Sale-->>Buyer: 조회 결과
 ```
 
-OPEN만으로 언제나 구매할 수 있는 것은 아니다. 접수와 실제 예약에서 회원 상태·판매 상태·판매 기간을 확인한다. 관리자는 판매를 CLOSED로 종료할 수 있다.
+OPEN 표시만으로 언제나 구매할 수 있는 것은 아니다. 접수와 실제 예약에서 DB의 회원 상태·판매 상태·판매 기간을 확인한다. 관리자는 판매를 CLOSED로 종료할 수 있고 변경 commit 후 표시 캐시를 무효화한다. rollback·무효화 경합과 TTL의 상세 시퀀스는 [캐시 설계](product-read-cache.md)가 소유한다.
 
 코드: [판매 명령](../../sale/src/main/java/com/example/limitedticketing/sale/application/service/SaleProductCommandService.java), [판매 조회](../../sale/src/main/java/com/example/limitedticketing/sale/application/service/SaleProductQueryService.java).
 

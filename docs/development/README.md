@@ -29,10 +29,13 @@ docker compose ps
 |---|---|
 | Application | `http://localhost:8081` |
 | PostgreSQL | `localhost:5432/limited_ticketing` |
-| Redis | `localhost:6379` |
+| 대기열 Redis | `localhost:6379` |
+| 조회 Redis | `localhost:6380`, `redis-read` 서비스 |
 | Kafka bootstrap | `localhost:19092,localhost:29092,localhost:39092` |
 
 ### 애플리케이션 실행
+
+상품 표시 캐시는 조회 전용 Redis를 사용한다. `SALE_CACHE_ENABLED=false`로 캐시 없는 같은 DB 조회 경로를 비교할 수 있다. TTL·Lease·접속 timeout은 `limited-ticketing.sale-cache` 설정을 따른다. 구매 판정은 항상 DB를 사용한다. [캐시 계약](../architecture/product-read-cache.md), [재현·측정 절차](../performance/catalog-read-cache.md)를 참고한다.
 
 ```bash
 SPRING_PROFILES_ACTIVE=local ./gradlew :app:bootRun

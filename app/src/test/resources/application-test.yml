@@ -4,6 +4,8 @@ spring:
       auto-startup: false
 
 limited-ticketing:
+  sale-cache:
+    enabled: false
   kafka:
     provision-topics: false
     publisher-initial-delay: 3600000

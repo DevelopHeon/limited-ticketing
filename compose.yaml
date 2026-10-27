@@ -25,6 +25,19 @@ services:
       timeout: 5s
       retries: 10
 
+  redis-read:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:${READ_REDIS_PORT:-6380}:6379"
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru", "--save", "", "--appendonly", "no"]
+    cpus: 0.5
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   kafka-1:
     image: apache/kafka:4.2.2@sha256:1213eb3943d551e5ed1fca7a4e109001cee35770b66a02a0c37a8964efe09b69
     profiles: [kafka]

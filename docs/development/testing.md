@@ -31,6 +31,8 @@
 
 `ModularityDocumentationTests`는 Spring Modulith `Documenter`로 코드 기준의 모듈 문서를 생성한다.
 
+`SaleProductReadCacheIntegrationTest`는 PostgreSQL과 서로 다른 두 Redis에서 warm hit의 SQL 0건, 목록 일괄 조회, stale OPEN의 구매 거절, rollback·commit 무효화, 이전 generation/token의 fill·release 거절, deadline·TTL·손상 값·generation 유실, 동시 miss, 조회 Redis 중단의 DB 전환과 대기열 데이터·health 보존을 검증한다. TTL 복구 테스트 일부는 데이터 key의 TTL을 짧게 조정해 만료를 관찰하며 기본 30초를 매번 기다리는 실험은 아니다. 판매 Service 단위 테스트는 캐시 오류와 DB 오류의 처리·afterCommit 등록 경계를 검증하며 실제 transaction은 통합 테스트로 확인한다.
+
 ```text
 app/build/spring-modulith-docs/
 ├── components.puml

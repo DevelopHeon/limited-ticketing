@@ -3,8 +3,9 @@ package com.example.limitedticketing.sale.application.service;
 import com.example.limitedticketing.sale.application.port.out.SaleProductSearchPort;
 import com.example.limitedticketing.sale.application.port.out.dto.SaleProductPage;
 import com.example.limitedticketing.sale.application.usecase.FindPurchasableSaleProductUseCase;
-import com.example.limitedticketing.sale.application.usecase.FindSaleProductDetailUseCase;
-import com.example.limitedticketing.sale.application.usecase.FindSaleProductsUseCase;
+import com.example.limitedticketing.sale.application.usecase.LoadSaleProductDetailUseCase;
+import com.example.limitedticketing.sale.application.usecase.LoadSaleProductsUseCase;
+import com.example.limitedticketing.sale.application.usecase.IsSaleProductClosedUseCase;
 import com.example.limitedticketing.sale.application.usecase.SaleProductExistsUseCase;
 import com.example.limitedticketing.sale.application.usecase.dto.query.FindPurchasableSaleProductQuery;
 import com.example.limitedticketing.sale.application.usecase.dto.query.FindSaleProductQuery;
@@ -14,18 +15,25 @@ import com.example.limitedticketing.sale.application.usecase.dto.result.SaleProd
 import com.example.limitedticketing.sale.application.usecase.dto.result.SaleProductPageResult;
 import com.example.limitedticketing.sale.application.usecase.dto.result.SaleProductSummaryResult;
 import com.example.limitedticketing.sale.domain.model.SaleProduct;
+import com.example.limitedticketing.sale.domain.model.Product;
+import com.example.limitedticketing.sale.domain.model.SaleStatus;
+import com.example.limitedticketing.sale.domain.exception.SaleException;
 import com.example.limitedticketing.sale.domain.repository.ProductRepository;
 import com.example.limitedticketing.sale.domain.repository.SaleProductRepository;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class SaleProductQueryService implements
     FindPurchasableSaleProductUseCase,
-    FindSaleProductDetailUseCase,
+    LoadSaleProductDetailUseCase,
     SaleProductExistsUseCase,
-    FindSaleProductsUseCase {
+    LoadSaleProductsUseCase,
+    IsSaleProductClosedUseCase {
 
     private final SaleProductSearchPort saleProductSearchPort;
     private final ProductRepository productRepository;
@@ -51,7 +59,7 @@ public class SaleProductQueryService implements
     }
 
     @Transactional(readOnly = true)
-    public SaleProductDetailResult findDetail(FindSaleProductQuery query) {
+    public SaleProductDetailResult loadDetail(FindSaleProductQuery query) {
         SaleProduct saleProduct = saleProductRepository.getRequiredById(query.saleProductId());
 
         return SaleProductDetailResult.from(saleProduct, productRepository.getRequiredById(saleProduct.getProductId()));
@@ -62,8 +70,14 @@ public class SaleProductQueryService implements
         return saleProductRepository.findById(query.saleProductId()).isPresent();
     }
 
+    @Override
     @Transactional(readOnly = true)
-    public SaleProductPageResult findPage(FindSaleProductsQuery query) {
+    public boolean isClosed(FindSaleProductQuery query) {
+        return saleProductRepository.getRequiredById(query.saleProductId()).getStatus() == SaleStatus.CLOSED;
+    }
+
+    @Transactional(readOnly = true)
+    public SaleProductPageResult loadPage(FindSaleProductsQuery query) {
         SaleProductPage saleProductPage = saleProductSearchPort.findPage(
             query.status(),
             query.page(),
@@ -71,14 +85,25 @@ public class SaleProductQueryService implements
             query.sort(),
             query.direction()
         );
+        List<Long> productIds = saleProductPage.items().stream().map(SaleProduct::getProductId).distinct().toList();
+        Map<Long, Product> products = productIds.isEmpty() ? Map.of()
+            : productRepository.findAllById(productIds).stream().collect(Collectors.toMap(Product::getId, Function.identity()));
         List<SaleProductSummaryResult> items = saleProductPage.items().stream()
             .map(saleProduct -> SaleProductSummaryResult.from(
                 saleProduct,
-                productRepository.getRequiredById(saleProduct.getProductId())
+                requireProduct(products, saleProduct.getProductId())
             ))
             .toList();
 
         return new SaleProductPageResult(items, query.page(), query.size(), saleProductPage.totalCount());
+    }
+
+    private Product requireProduct(Map<Long, Product> products, Long productId) {
+        Product product = products.get(productId);
+        if (product == null) {
+            throw SaleException.productNotFound();
+        }
+        return product;
     }
 
 }

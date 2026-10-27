@@ -42,11 +42,11 @@ public class SaleProductPersistenceAdapter implements SaleProductRepository, Sal
         SaleProductSort sort,
         SortDirection direction
     ) {
-        Pageable pageable = PageRequest.of(
-            page,
-            size,
-            Sort.by(Sort.Direction.valueOf(direction.name()), sort.getRequestProperty())
-        );
+        Sort ordering = Sort.by(Sort.Direction.valueOf(direction.name()), sort.getRequestProperty());
+        if (sort != SaleProductSort.ID) {
+            ordering = ordering.and(Sort.by(Sort.Direction.valueOf(direction.name()), "id"));
+        }
+        Pageable pageable = PageRequest.of(page, size, ordering);
         Page<SaleProductJpaEntity> result = status == null
             ? saleProductJpaRepository.findAll(pageable)
             : saleProductJpaRepository.findByStatus(status, pageable);

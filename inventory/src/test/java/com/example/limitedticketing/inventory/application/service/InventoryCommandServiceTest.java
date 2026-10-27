@@ -48,6 +48,7 @@ class InventoryCommandServiceTest {
     @Test
     @DisplayName("재고 원장이 없는 상품의 예약 실패를 품절로 잘못 응답하지 않는다")
     void absentInventoryIsNotReportedAsSoldOut() {
+        when(inventoryRepository.getRequiredBySaleProductId(1L)).thenCallRealMethod();
         when(inventoryRepository.findBySaleProductId(1L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> inventoryCommandService.reserve(new ReserveInventoryCommand(1L, 1)))
@@ -57,6 +58,7 @@ class InventoryCommandServiceTest {
     @Test
     @DisplayName("원장이 존재하지만 예약 가능한 수량이 없으면 품절로 응답한다")
     void exhaustedExistingInventoryIsReportedAsSoldOut() {
+        when(inventoryRepository.getRequiredBySaleProductId(1L)).thenCallRealMethod();
         when(inventoryRepository.findBySaleProductId(1L)).thenReturn(Optional.of(Inventory.reconstitute(10L, 1L, 0, 1, 0)));
 
         assertThatThrownBy(() -> inventoryCommandService.reserve(new ReserveInventoryCommand(1L, 1)))

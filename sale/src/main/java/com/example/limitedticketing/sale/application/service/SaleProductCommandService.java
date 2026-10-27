@@ -10,7 +10,6 @@ import com.example.limitedticketing.sale.application.usecase.dto.command.CloseSa
 import com.example.limitedticketing.sale.application.usecase.dto.command.CreateSaleProductCommand;
 import com.example.limitedticketing.sale.application.usecase.dto.command.OpenSaleProductCommand;
 import com.example.limitedticketing.sale.application.usecase.dto.result.SaleProductCommandResult;
-import com.example.limitedticketing.sale.domain.exception.SaleException;
 import com.example.limitedticketing.sale.domain.model.Product;
 import com.example.limitedticketing.sale.domain.model.SaleProduct;
 import com.example.limitedticketing.sale.domain.repository.ProductRepository;
@@ -63,7 +62,7 @@ public class SaleProductCommandService implements
 
     @Transactional
     public SaleProductCommandResult changeSalePeriod(ChangeSalePeriodCommand command) {
-        SaleProduct saleProduct = getRequiredSaleProduct(command.saleProductId());
+        SaleProduct saleProduct = saleProductRepository.getRequiredById(command.saleProductId());
         saleProduct.changeSalePeriod(SalePeriod.of(command.saleStartsAt(), command.saleEndsAt()));
 
         return SaleProductCommandResult.from(saleProductRepository.save(saleProduct));
@@ -71,7 +70,7 @@ public class SaleProductCommandService implements
 
     @Transactional
     public SaleProductCommandResult open(OpenSaleProductCommand command) {
-        SaleProduct saleProduct = getRequiredSaleProduct(command.saleProductId());
+        SaleProduct saleProduct = saleProductRepository.getRequiredById(command.saleProductId());
         saleProduct.open(LocalDateTime.now(clock));
 
         return SaleProductCommandResult.from(saleProductRepository.save(saleProduct));
@@ -79,13 +78,10 @@ public class SaleProductCommandService implements
 
     @Transactional
     public SaleProductCommandResult close(CloseSaleProductCommand command) {
-        SaleProduct saleProduct = getRequiredSaleProduct(command.saleProductId());
+        SaleProduct saleProduct = saleProductRepository.getRequiredById(command.saleProductId());
         saleProduct.close();
 
         return SaleProductCommandResult.from(saleProductRepository.save(saleProduct));
     }
 
-    private SaleProduct getRequiredSaleProduct(Long id) {
-        return saleProductRepository.findById(id).orElseThrow(SaleException::productNotFound);
-    }
 }

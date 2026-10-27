@@ -140,9 +140,22 @@ class PurchaseCommandServiceTest {
     }
 
     @Test
+    @DisplayName("없는 구매의 취소는 구매 상태와 예약 재고를 변경하지 않는다")
+    void missingPurchaseCannotBeCancelled() {
+        when(purchaseRepository.getRequiredById(10L)).thenCallRealMethod();
+
+        assertThatThrownBy(() -> purchaseCommandService.cancel(new CancelPurchaseCommand(10L, 1L)))
+            .isInstanceOf(PurchaseException.class).extracting("code").isEqualTo("PURCHASE_NOT_FOUND");
+
+        verify(purchaseRepository, never()).transitionFromPending(any());
+        verifyNoInteractions(inventoryReservationPort);
+    }
+
+    @Test
     @DisplayName("구매 취소의 상태 전이가 경합으로 거부되면 예약 재고를 반환하지 않는다")
     void rejectedCancellationTransitionDoesNotReleaseInventory() {
         Purchase existing = purchase(2L, PurchaseStatus.PENDING_PAYMENT);
+        when(purchaseRepository.getRequiredById(10L)).thenCallRealMethod();
         when(purchaseRepository.findById(10L)).thenReturn(Optional.of(existing));
         doThrow(PurchaseException.invalidState("이미 처리된 구매"))
             .when(purchaseRepository).transitionFromPending(existing);

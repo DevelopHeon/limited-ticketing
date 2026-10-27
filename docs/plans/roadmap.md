@@ -13,6 +13,8 @@
 - Publisher는 기존 `ReservationOutboxMessage`를 받는 계약으로 정리했다. Consumer의 계약 DTO 자동 변환은 검토 후 보류했으며 문자열 수신·검증·DLT 경로를 유지한다. `./gradlew check :app:bootJar --continue`에서 Java 256개 테스트와 아키텍처·컨벤션 검사 및 빌드가 통과했다. 독립 리뷰에서도 결함이 발견되지 않았으며 한국어 commit/push와 기존 Notion 기록 갱신 후 사용자 검토를 기다린다.
 - 진입 구현을 PortService로 통합하고 Facade를 제거했다. PortService의 Output Port·Repository·구현 Service 직접 호출 금지는 유지하며, 슬롯 반환은 내부 UseCase로 분리했다. 현재 구조와 호출 그림은 [모듈 설계](../architecture/module-boundaries.md#호출-흐름과-의존-방향), 선택 이유·비용은 [ADR 0008 변경 결정](../adr/0008-application-entry-orchestration.md#진입-구현-통합--2026-10-21)을 따른다. 전체 검사·빌드와 독립 리뷰를 마쳤고 발견된 결함은 없다. 한국어 commit/push와 기존 Notion 기록 갱신 후 사용자 검토를 기다린다.
 
+- 6개 업무 모듈의 필수 조회·부재 예외를 7개 Domain Repository의 default 메서드로 모았다. `./gradlew check`에서 Java 289개 테스트와 아키텍처·컨벤션 검사를 통과했다. Optional·잠금·업무 검증의 경계는 [모듈 설계](../architecture/module-boundaries.md#aggregate-영속성과-application-출력-계약)를 따른다. 기존 미커밋 DTO 변환 변경은 이번 commit에서 제외한다.
+
 ## 단계별 진행
 
 | 단계 | 상태 | 확인할 근거 |

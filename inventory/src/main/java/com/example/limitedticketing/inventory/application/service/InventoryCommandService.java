@@ -67,11 +67,7 @@ public class InventoryCommandService implements
     }
 
     private void throwReservationFailure(Long saleProductId, InventoryException insufficientQuantityException) {
-        getRequiredInventory(saleProductId);
+        inventoryRepository.getRequiredBySaleProductId(saleProductId);
         throw insufficientQuantityException;
-    }
-
-    private Inventory getRequiredInventory(Long id) {
-        return inventoryRepository.findBySaleProductId(id).orElseThrow(InventoryException::notFound);
     }
 }

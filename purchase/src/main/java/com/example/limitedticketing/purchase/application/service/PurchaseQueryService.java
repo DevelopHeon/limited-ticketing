@@ -5,7 +5,6 @@ import com.example.limitedticketing.purchase.application.usecase.FindPurchaseFor
 import com.example.limitedticketing.purchase.application.usecase.dto.query.FindPurchaseByRequestQuery;
 import com.example.limitedticketing.purchase.application.usecase.dto.query.FindPurchaseForPaymentQuery;
 import com.example.limitedticketing.purchase.application.usecase.dto.result.PurchasePaymentTargetResult;
-import com.example.limitedticketing.purchase.domain.exception.PurchaseException;
 import com.example.limitedticketing.purchase.domain.model.Purchase;
 import com.example.limitedticketing.purchase.domain.repository.PurchaseRepository;
 import java.util.Optional;
@@ -23,7 +22,7 @@ public class PurchaseQueryService implements FindPurchaseForPaymentUseCase, Find
     }
 
     public PurchasePaymentTargetResult findForPayment(FindPurchaseForPaymentQuery query) {
-        Purchase purchase = getRequiredPurchase(query.purchaseId());
+        Purchase purchase = purchaseRepository.getRequiredById(query.purchaseId());
 
         return new PurchasePaymentTargetResult(
             purchase.getId(),
@@ -43,7 +42,4 @@ public class PurchaseQueryService implements FindPurchaseForPaymentUseCase, Find
             .map(Purchase::getId);
     }
 
-    private Purchase getRequiredPurchase(Long id) {
-        return purchaseRepository.findById(id).orElseThrow(PurchaseException::notFound);
-    }
 }

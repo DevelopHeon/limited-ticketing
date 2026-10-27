@@ -13,8 +13,6 @@ import com.example.limitedticketing.sale.application.usecase.dto.result.Purchasa
 import com.example.limitedticketing.sale.application.usecase.dto.result.SaleProductDetailResult;
 import com.example.limitedticketing.sale.application.usecase.dto.result.SaleProductPageResult;
 import com.example.limitedticketing.sale.application.usecase.dto.result.SaleProductSummaryResult;
-import com.example.limitedticketing.sale.domain.exception.SaleException;
-import com.example.limitedticketing.sale.domain.model.Product;
 import com.example.limitedticketing.sale.domain.model.SaleProduct;
 import com.example.limitedticketing.sale.domain.repository.ProductRepository;
 import com.example.limitedticketing.sale.domain.repository.SaleProductRepository;
@@ -45,7 +43,7 @@ public class SaleProductQueryService implements
 
     @Transactional(readOnly = true)
     public PurchasableSaleProductResult findPurchasable(FindPurchasableSaleProductQuery query) {
-        SaleProduct saleProduct = getRequiredSaleProduct(query.saleProductId());
+        SaleProduct saleProduct = saleProductRepository.getRequiredById(query.saleProductId());
 
         saleProduct.ensurePurchasableAt(query.requestedAt());
 
@@ -54,9 +52,9 @@ public class SaleProductQueryService implements
 
     @Transactional(readOnly = true)
     public SaleProductDetailResult findDetail(FindSaleProductQuery query) {
-        SaleProduct saleProduct = getRequiredSaleProduct(query.saleProductId());
+        SaleProduct saleProduct = saleProductRepository.getRequiredById(query.saleProductId());
 
-        return SaleProductDetailResult.from(saleProduct, getRequiredProduct(saleProduct.getProductId()));
+        return SaleProductDetailResult.from(saleProduct, productRepository.getRequiredById(saleProduct.getProductId()));
     }
 
     @Transactional(readOnly = true)
@@ -76,18 +74,11 @@ public class SaleProductQueryService implements
         List<SaleProductSummaryResult> items = saleProductPage.items().stream()
             .map(saleProduct -> SaleProductSummaryResult.from(
                 saleProduct,
-                getRequiredProduct(saleProduct.getProductId())
+                productRepository.getRequiredById(saleProduct.getProductId())
             ))
             .toList();
 
         return new SaleProductPageResult(items, query.page(), query.size(), saleProductPage.totalCount());
     }
 
-    private Product getRequiredProduct(Long id) {
-        return productRepository.findById(id).orElseThrow(SaleException::productNotFound);
-    }
-
-    private SaleProduct getRequiredSaleProduct(Long id) {
-        return saleProductRepository.findById(id).orElseThrow(SaleException::productNotFound);
-    }
 }

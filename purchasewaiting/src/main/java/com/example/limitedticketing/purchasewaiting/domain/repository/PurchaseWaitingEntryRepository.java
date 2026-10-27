@@ -1,5 +1,6 @@
 package com.example.limitedticketing.purchasewaiting.domain.repository;
 
+import com.example.limitedticketing.purchasewaiting.domain.exception.PurchaseWaitingException;
 import com.example.limitedticketing.purchasewaiting.domain.model.PurchaseWaitingEntry;
 import java.time.LocalDateTime;
 import java.util.Collection;
@@ -23,6 +24,10 @@ public interface PurchaseWaitingEntryRepository {
     Optional<PurchaseWaitingEntry> findByIdForUpdateSkipLocked(UUID queueEntryId);
 
     Optional<PurchaseWaitingEntry> findById(UUID queueEntryId);
+
+    default PurchaseWaitingEntry getRequiredById(UUID queueEntryId) {
+        return findById(queueEntryId).orElseThrow(PurchaseWaitingException::notFound);
+    }
 
     Optional<Long> findSaleProductId(UUID queueEntryId);
 

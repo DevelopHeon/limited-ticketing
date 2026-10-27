@@ -1,5 +1,6 @@
 package com.example.limitedticketing.inventory.domain.repository;
 
+import com.example.limitedticketing.inventory.domain.exception.InventoryException;
 import com.example.limitedticketing.inventory.domain.model.Inventory;
 import java.util.Optional;
 
@@ -16,4 +17,8 @@ public interface InventoryRepository {
     Optional<Inventory> findById(Long inventoryId);
 
     Optional<Inventory> findBySaleProductId(Long saleProductId);
+
+    default Inventory getRequiredBySaleProductId(Long saleProductId) {
+        return findBySaleProductId(saleProductId).orElseThrow(InventoryException::notFound);
+    }
 }

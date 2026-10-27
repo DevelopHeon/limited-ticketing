@@ -156,6 +156,8 @@ flowchart TB
 
 [ADR 0009](../adr/0009-domain-repository-ownership.md)에 따라 Aggregate의 조회·저장·조건부 전이는 Domain Repository를 직접 사용한다. MemberRepository, ProductRepository, SaleProductRepository, InventoryRepository, PurchaseRepository, PaymentRepository, PurchaseWaitingEntryRepository를 infrastructure의 PersistenceAdapter가 구현한다. 그 사이에 동일 기능의 Application Repository Port나 중계 Adapter를 추가하지 않는다.
 
+동일한 필수 조회와 부재 예외는 각 Domain Repository의 `default getRequiredById()`로 모은다. 재고는 판매 ID로 조회하므로 `getRequiredBySaleProductId()`를 사용한다. 부재가 정상인 멱등성·존재 여부 조회는 기존 `Optional` 계약을 유지한다. 소유권·상태·구매 가능 여부는 Service와 Domain의 업무 규칙에 남기며, 잠금 조회와 복구의 부재 처리를 일반 필수 조회로 합치지 않는다. 이 메서드들은 기존 조회를 재사용하며 별도 transaction이나 잠금을 만들지 않는다.
+
 재고 reserve/confirm/release 조건부 UPDATE, 구매·결제 상태 조건부 저장, 대기 요청 행 잠금·claim·복구 조회도 해당 Aggregate의 영속성 계약이다. Domain Repository는 framework·Application에 의존하지 않는다. Query라는 이름만으로 잠금 조회나 복구 transaction을 read-only로 바꾸지 않는다.
 
 판매 목록의 필터·정렬·페이지 조회는 SaleProductSearchPort, Redis 대기·복구·입구 제한과 외부 모듈 호출·이벤트 발행은 Application Output Port다. 상품별 순번 발급도 Aggregate 저장 계약과 구분해 기존 Sequence Port를 유지한다.
@@ -177,7 +179,7 @@ flowchart TB
 | domain.repository | Aggregate 저장 결과·멱등 저장 여부 |
 | shared.api | 성공 응답 외피 |
 
-공개 DTO는 Domain Aggregate·Domain enum·내부 구현 DTO를 노출하지 않는다. HTTP 응답과 모듈 공개 응답도 구분한다. Finder/Support는 별도 계층으로 두지 않으며 필요한 Aggregate 조회와 기존 오류는 Domain Repository로 처리한다. 반복 조회가 한 Service 내부에 있으면 의미 있는 private 메서드로 묶는다.
+공개 DTO는 Domain Aggregate·Domain enum·내부 구현 DTO를 노출하지 않는다. HTTP 응답과 모듈 공개 응답도 구분한다. Finder/Support는 별도 계층으로 두지 않으며 필요한 Aggregate 조회와 기존 오류는 Domain Repository로 처리한다. Service의 private 메서드는 기본 조회의 중복 대신 해당 업무의 추가 판단과 조율을 표현한다.
 
 ### 예외와 HTTP 응답
 

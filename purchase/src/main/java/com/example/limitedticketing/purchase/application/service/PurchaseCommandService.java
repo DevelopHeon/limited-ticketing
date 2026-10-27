@@ -82,7 +82,7 @@ public class PurchaseCommandService implements ReservePurchaseUseCase, MarkPurch
 
     @Transactional
     public void markPaid(MarkPurchasePaidCommand command) {
-        Purchase purchase = getRequiredPurchase(command.purchaseId());
+        Purchase purchase = purchaseRepository.getRequiredById(command.purchaseId());
 
         purchase.markPaid();
         purchaseRepository.transitionFromPending(purchase);
@@ -90,7 +90,7 @@ public class PurchaseCommandService implements ReservePurchaseUseCase, MarkPurch
 
     @Transactional
     public void cancel(CancelPurchaseCommand command) {
-        Purchase purchase = getRequiredPurchase(command.purchaseId());
+        Purchase purchase = purchaseRepository.getRequiredById(command.purchaseId());
 
         purchase.cancelBy(command.memberId());
         purchaseRepository.transitionFromPending(purchase);
@@ -105,9 +105,5 @@ public class PurchaseCommandService implements ReservePurchaseUseCase, MarkPurch
         }
 
         return new PurchaseReservationResult(purchase.getId(), purchase.getStatus(), purchase.getExpiresAt());
-    }
-
-    private Purchase getRequiredPurchase(Long id) {
-        return purchaseRepository.findById(id).orElseThrow(PurchaseException::notFound);
     }
 }

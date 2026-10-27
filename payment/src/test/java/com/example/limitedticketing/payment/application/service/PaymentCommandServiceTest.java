@@ -60,9 +60,22 @@ class PaymentCommandServiceTest {
     }
 
     @Test
+    @DisplayName("없는 결제의 승인은 구매 조회와 재고 확정을 진행하지 않는다")
+    void missingPaymentCannotBeApproved() {
+        when(paymentRepository.getRequiredById(20L)).thenCallRealMethod();
+
+        assertThatThrownBy(() -> paymentCommandService.approve(new ApprovePaymentCommand(1L, 20L)))
+            .isInstanceOf(PaymentException.class).extracting("code").isEqualTo("PAYMENT_NOT_FOUND");
+
+        verify(paymentRepository, never()).transitionFromReady(any());
+        verifyNoInteractions(purchasePaymentPort, inventoryConfirmationPort);
+    }
+
+    @Test
     @DisplayName("예약 만료 직전의 승인은 구매를 완료하고 예약 재고 한 개를 판매 수량으로 전환한다")
     void approvalBeforeTheDeadlineCompletesPurchaseAndInventory() {
         Payment payment = payment(PaymentStatus.READY);
+        when(paymentRepository.getRequiredById(20L)).thenCallRealMethod();
         when(paymentRepository.findById(20L)).thenReturn(Optional.of(payment));
         when(purchasePaymentPort.findPaymentTarget(10L))
             .thenReturn(target(1L, NOW.plusNanos(1)));
@@ -96,6 +109,7 @@ class PaymentCommandServiceTest {
     @DisplayName("예약 만료 시각 이후의 승인은 결제 상태와 구매 및 재고를 변경하지 않는다")
     void expiredReservationCannotBeApproved(long secondsUntilExpiration) {
         Payment payment = payment(PaymentStatus.READY);
+        when(paymentRepository.getRequiredById(20L)).thenCallRealMethod();
         when(paymentRepository.findById(20L)).thenReturn(Optional.of(payment));
         when(purchasePaymentPort.findPaymentTarget(10L))
             .thenReturn(target(1L, NOW.plusSeconds(secondsUntilExpiration)));
@@ -117,6 +131,7 @@ class PaymentCommandServiceTest {
         when(purchasePaymentPort.findPaymentTarget(10L))
             .thenReturn(target(2L, NOW.plusMinutes(5)));
         if (!operation.equals("create")) {
+            when(paymentRepository.getRequiredById(20L)).thenCallRealMethod();
             when(paymentRepository.findById(20L)).thenReturn(Optional.of(payment));
         }
 
@@ -169,6 +184,7 @@ class PaymentCommandServiceTest {
     @DisplayName("결제 실패는 해당 시도만 실패로 기록하고 구매 예약과 재고를 유지한다")
     void failedAttemptKeepsThePurchaseAndInventoryReservation() {
         Payment payment = payment(PaymentStatus.READY);
+        when(paymentRepository.getRequiredById(20L)).thenCallRealMethod();
         when(paymentRepository.findById(20L)).thenReturn(Optional.of(payment));
         when(purchasePaymentPort.findPaymentTarget(10L))
             .thenReturn(target(1L, NOW.plusMinutes(5)));
@@ -185,6 +201,7 @@ class PaymentCommandServiceTest {
     @Test
     @DisplayName("구매 완료의 상태 전이가 경합으로 거부되면 재고 확정과 결제 저장을 진행하지 않는다")
     void rejectedPurchaseTransitionDoesNotConfirmInventoryOrPersistApproval() {
+        when(paymentRepository.getRequiredById(20L)).thenCallRealMethod();
         when(paymentRepository.findById(20L)).thenReturn(Optional.of(payment(PaymentStatus.READY)));
         when(purchasePaymentPort.findPaymentTarget(10L))
             .thenReturn(target(1L, NOW.plusMinutes(5)));

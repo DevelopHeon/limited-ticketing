@@ -62,7 +62,7 @@ public class PaymentCommandService implements CreatePaymentUseCase, ApprovePayme
 
     @Transactional
     public PaymentAttemptResult approve(ApprovePaymentCommand command) {
-        Payment payment = getRequiredPayment(command.paymentId());
+        Payment payment = paymentRepository.getRequiredById(command.paymentId());
         PurchasePaymentTarget purchase = getPendingPurchase(
             command.memberId(),
             payment.getPurchaseId(),
@@ -81,7 +81,7 @@ public class PaymentCommandService implements CreatePaymentUseCase, ApprovePayme
 
     @Transactional
     public PaymentAttemptResult fail(FailPaymentCommand command) {
-        Payment payment = getRequiredPayment(command.paymentId());
+        Payment payment = paymentRepository.getRequiredById(command.paymentId());
         PurchasePaymentTarget purchase = findPurchase(payment.getPurchaseId());
         ensurePurchaseMember(command.memberId(), purchase);
 
@@ -125,7 +125,4 @@ public class PaymentCommandService implements CreatePaymentUseCase, ApprovePayme
         return PaymentAttemptResult.of(payment);
     }
 
-    private Payment getRequiredPayment(Long id) {
-        return paymentRepository.findById(id).orElseThrow(PaymentException::notFound);
-    }
 }

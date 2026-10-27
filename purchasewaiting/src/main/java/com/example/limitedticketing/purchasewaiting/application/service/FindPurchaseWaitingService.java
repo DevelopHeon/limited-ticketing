@@ -41,7 +41,7 @@ public class FindPurchaseWaitingService implements FindPurchaseWaitingUseCase {
     @Override
     @Transactional(readOnly = true)
     public PurchaseWaitingResult find(FindPurchaseWaitingQuery query) {
-        PurchaseWaitingEntry entry = purchaseWaitingEntryRepository.findById(query.waitingEntryId()).orElseThrow(PurchaseWaitingException::notFound);
+        PurchaseWaitingEntry entry = purchaseWaitingEntryRepository.getRequiredById(query.waitingEntryId());
         if (!entry.getMemberId().equals(query.memberId())) {
             throw PurchaseWaitingException.ownershipViolation();
         }

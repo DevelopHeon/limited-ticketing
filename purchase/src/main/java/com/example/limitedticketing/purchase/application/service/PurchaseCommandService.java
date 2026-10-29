@@ -11,7 +11,6 @@ import com.example.limitedticketing.purchase.application.usecase.dto.command.Can
 import com.example.limitedticketing.purchase.application.usecase.dto.command.MarkPurchasePaidCommand;
 import com.example.limitedticketing.purchase.application.usecase.dto.command.ReservePurchaseCommand;
 import com.example.limitedticketing.purchase.application.usecase.dto.result.PurchaseReservationResult;
-import com.example.limitedticketing.purchase.domain.exception.PurchaseException;
 import com.example.limitedticketing.purchase.domain.model.Purchase;
 import com.example.limitedticketing.purchase.domain.repository.IdempotentPurchase;
 import com.example.limitedticketing.purchase.domain.repository.PurchaseRepository;
@@ -54,7 +53,7 @@ public class PurchaseCommandService implements ReservePurchaseUseCase, MarkPurch
             )
             .orElse(null);
         if (existing != null) {
-            return reservationResultOf(existing, command.saleProductId());
+            return PurchaseReservationResult.of(existing, command.saleProductId());
         }
 
         LocalDateTime requestedAt = LocalDateTime.now(clock);
@@ -72,12 +71,12 @@ public class PurchaseCommandService implements ReservePurchaseUseCase, MarkPurch
         ));
         Purchase purchase = savedPurchase.purchase();
         if (!savedPurchase.created()) {
-            return reservationResultOf(purchase, command.saleProductId());
+            return PurchaseReservationResult.of(purchase, command.saleProductId());
         }
 
         inventoryReservationPort.reserve(saleProduct.saleProductId(), PURCHASE_QUANTITY);
 
-        return reservationResultOf(purchase, command.saleProductId());
+        return PurchaseReservationResult.of(purchase, command.saleProductId());
     }
 
     @Transactional
@@ -99,11 +98,4 @@ public class PurchaseCommandService implements ReservePurchaseUseCase, MarkPurch
         );
     }
 
-    private PurchaseReservationResult reservationResultOf(Purchase purchase, Long saleProductId) {
-        if (!purchase.getSaleProductId().equals(saleProductId)) {
-            throw PurchaseException.requestKeyReuse();
-        }
-
-        return new PurchaseReservationResult(purchase.getId(), purchase.getStatus(), purchase.getExpiresAt());
-    }
 }

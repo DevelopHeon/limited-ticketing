@@ -49,6 +49,8 @@ Domain 및 Application Service 단위 테스트는 각 업무 모듈이 소유�
 
 테스트만 실행하려면 `./gradlew test`를 사용한다. 테스트 클래스와 메서드의 `@DisplayName`은 검증하는 업무 규칙을 한국어로 설명한다.
 
+`RedisSaleProductReadCacheAdapterTest`는 알 수 없는 Lua 상태·누락된 응답·잘못된 claim이 DB 전환과 오류 지표로 이어지는지 검증한다. generation 충돌 후 재시도와 두 번의 시도 상한도 확인한다. 실제 Redis의 소유권·만료·무효화 경합은 기존 `SaleProductReadCacheIntegrationTest`가 검증한다.
+
 ## 부하 평가 도구의 계약 검사
 
 Python unittest는 원본 덮어쓰기·불완전 결과·재고/구매 연결·DB 동시 실행·정리 소유권·지연 판정을, Node test는 실제 k6가 사용하는 응답 분류와 fixture 중복을 검사한다. 테스트는 한국어 설명을 제공한다. 실제 DB/Redis/HTTP/k6 연결은 Smoke와 최종 SQL 검증으로 확인한다.

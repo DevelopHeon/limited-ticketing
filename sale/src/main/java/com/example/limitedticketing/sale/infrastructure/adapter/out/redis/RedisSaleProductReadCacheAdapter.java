@@ -121,29 +121,34 @@ public class RedisSaleProductReadCacheAdapter implements SaleProductReadCachePor
                 List<?> result = saleCacheStringRedisTemplate.execute(READ_CLAIM,
                     List.of(GENERATION_KEY, key, key + ":lock"), generation, token,
                     Long.toString(lockLeaseMillis), Long.toString(jittered(ttlMillis)));
-                if (result == null || result.isEmpty() || "STALE".equals(result.get(0))) {
-                    continue;
+                RedisCacheReadStatus status = parseReadStatus(result);
+                if (status != RedisCacheReadStatus.STALE) {
+                    meterRegistry.counter("sale.cache.lookup", "kind", kind, "result", status.name().toLowerCase(Locale.ROOT)).increment();
                 }
-                String status = result.get(0).toString();
-                meterRegistry.counter("sale.cache.lookup", "kind", kind, "result", status.toLowerCase(Locale.ROOT)).increment();
-                if ("HIT".equals(status)) {
-                    String payload = result.get(1).toString();
-                    try {
-                        return CacheLookup.hit(decoder.decode(payload));
-                    } catch (JsonProcessingException | IllegalArgumentException exception) {
-                        saleCacheStringRedisTemplate.execute(DELETE_IF_VALUE, List.of(key), payload);
-                        operation("decode", "error");
-                        return CacheLookup.bypass();
+                switch (status) {
+                    case STALE -> {
+                    }
+                    case HIT -> {
+                        String payload = result.get(1).toString();
+                        try {
+                            return CacheLookup.hit(decoder.decode(payload));
+                        } catch (JsonProcessingException | IllegalArgumentException exception) {
+                            saleCacheStringRedisTemplate.execute(DELETE_IF_VALUE, List.of(key), payload);
+                            operation("decode", "error");
+                            return CacheLookup.bypass();
+                        }
+                    }
+                    case CLAIMED -> {
+                        return CacheLookup.claimed(new CacheFillLease(UUID.fromString(result.get(1).toString()),
+                            UUID.fromString(result.get(2).toString()), Long.parseLong(result.get(3).toString())));
+                    }
+                    case BUSY -> {
+                        return CacheLookup.busy();
                     }
                 }
-                if ("CLAIMED".equals(status)) {
-                    return CacheLookup.claimed(new CacheFillLease(UUID.fromString(result.get(1).toString()),
-                        UUID.fromString(result.get(2).toString()), Long.parseLong(result.get(3).toString())));
-                }
-                return CacheLookup.busy();
             }
             return CacheLookup.bypass();
-        } catch (DataAccessException exception) {
+        } catch (DataAccessException | IllegalArgumentException exception) {
             operation("read", "error");
             LOG.debug("판매 캐시 조회 실패: DB 조회로 전환", exception);
             return CacheLookup.bypass();
@@ -208,6 +213,26 @@ public class RedisSaleProductReadCacheAdapter implements SaleProductReadCachePor
 
     private void operation(String operation, String result) {
         meterRegistry.counter("sale.cache.operations", "operation", operation, "result", result).increment();
+    }
+
+    private RedisCacheReadStatus parseReadStatus(List<?> response) {
+        if (response == null || response.isEmpty() || response.stream().anyMatch(value -> !(value instanceof String))) {
+            throw new IllegalArgumentException("Missing or invalid cache script response");
+        }
+        RedisCacheReadStatus status = RedisCacheReadStatus.valueOf((String) response.get(0));
+        int expectedSize = switch (status) {
+            case HIT -> 2;
+            case CLAIMED -> 4;
+            case BUSY, STALE -> 1;
+        };
+        if (response.size() != expectedSize) {
+            throw new IllegalArgumentException("Invalid cache script response size");
+        }
+        return status;
+    }
+
+    private enum RedisCacheReadStatus {
+        HIT, CLAIMED, BUSY, STALE
     }
 
     @FunctionalInterface

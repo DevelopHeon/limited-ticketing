@@ -50,6 +50,8 @@ sequenceDiagram
 
 현재 generation과 값 확인·claim은 Lua로 검사한다. generation을 바꾼 뒤에는 이전 key를 조회하지 않으며, 이전 소유자의 fill은 generation·lock token 검사로 거절한다. 전체 카탈로그를 무효화하므로 관계없는 상품의 hit율도 내려간다. 기존 key는 TTL로 제거하고 SCAN/KEYS/FLUSHDB로 일괄 삭제하지 않는다.
 
+Lua의 `HIT·CLAIMED·BUSY·STALE` 응답은 Adapter 내부 `RedisCacheReadStatus` enum으로 해석한다. `STALE`는 값의 TTL 만료가 아니라 요청 generation과 현재 generation의 불일치이며 두 번까지 시도한 뒤 DB로 전환한다. Application의 `CacheLookup.Status`에는 내부 재시도 상태를 노출하지 않는다. 알 수 없는 상태·손상된 응답은 `BUSY`로 간주하지 않고 read 오류 지표를 남겨 DB로 전환하며, 임의 문자열을 lookup 지표 label로 사용하지 않는다.
+
 ## key·TTL·장애 경계
 
 - generation: `sale-cache:{catalog}:v1:generation`. UUID이며 유실·손상 시 새 세대를 사용한다. `{catalog}`는 literal hash tag다.

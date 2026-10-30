@@ -7,9 +7,10 @@ import com.example.limitedticketing.sale.application.port.out.dto.SaleProductCac
 import com.example.limitedticketing.sale.application.port.out.dto.CachedSaleProductDetail;
 import com.example.limitedticketing.sale.application.port.out.dto.CachedSaleProductPage;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import io.micrometer.core.instrument.MeterRegistry;
+import com.example.limitedticketing.sale.infrastructure.metrics.SaleCacheMetrics;
+import com.example.limitedticketing.sale.infrastructure.metrics.SaleCacheMetrics.CacheKind;
+import com.example.limitedticketing.sale.infrastructure.metrics.SaleCacheMetrics.Operation;
 import java.util.List;
-import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import org.slf4j.Logger;
@@ -35,7 +36,7 @@ public class RedisSaleProductReadCacheAdapter implements SaleProductReadCachePor
         new ClassPathResource("redis/sale-cache-delete-if-value.lua"), Long.class);
     private final StringRedisTemplate saleCacheStringRedisTemplate;
     private final SaleProductCacheCodec saleProductCacheCodec;
-    private final MeterRegistry meterRegistry;
+    private final SaleCacheMetrics saleCacheMetrics;
     private final boolean enabled;
     private final long detailTtlMillis;
     private final long listTtlMillis;
@@ -44,7 +45,7 @@ public class RedisSaleProductReadCacheAdapter implements SaleProductReadCachePor
 
     public RedisSaleProductReadCacheAdapter(
         @Qualifier("saleCacheStringRedisTemplate") StringRedisTemplate saleCacheStringRedisTemplate,
-        SaleProductCacheCodec saleProductCacheCodec, MeterRegistry meterRegistry,
+        SaleProductCacheCodec saleProductCacheCodec, SaleCacheMetrics saleCacheMetrics,
         @Value("${limited-ticketing.sale-cache.enabled:true}") boolean enabled,
         @Value("${limited-ticketing.sale-cache.detail-ttl-ms:30000}") long detailTtlMillis,
         @Value("${limited-ticketing.sale-cache.list-ttl-ms:10000}") long listTtlMillis,
@@ -55,7 +56,7 @@ public class RedisSaleProductReadCacheAdapter implements SaleProductReadCachePor
         }
         this.saleCacheStringRedisTemplate = saleCacheStringRedisTemplate;
         this.saleProductCacheCodec = saleProductCacheCodec;
-        this.meterRegistry = meterRegistry;
+        this.saleCacheMetrics = saleCacheMetrics;
         this.enabled = enabled;
         this.detailTtlMillis = detailTtlMillis;
         this.listTtlMillis = listTtlMillis;
@@ -65,24 +66,24 @@ public class RedisSaleProductReadCacheAdapter implements SaleProductReadCachePor
 
     @Override
     public CacheLookup<CachedSaleProductDetail> findDetail(Long saleProductId) {
-        return read("detail", "detail:" + saleProductId, detailTtlMillis,
+        return read(CacheKind.DETAIL, "detail:" + saleProductId, detailTtlMillis,
             payload -> saleProductCacheCodec.decodeDetail(payload, saleProductId));
     }
 
     @Override
     public CacheLookup<CachedSaleProductPage> findPage(SaleProductCacheQuery query) {
-        return read("list", pageSuffix(query), listTtlMillis,
+        return read(CacheKind.LIST, pageSuffix(query), listTtlMillis,
             payload -> saleProductCacheCodec.decodePage(payload, query.page(), query.size()));
     }
 
     @Override
     public void storeDetail(Long saleProductId, CacheFillLease lease, CachedSaleProductDetail result) {
-        store("detail", "detail:" + saleProductId, lease, () -> saleProductCacheCodec.encodeDetail(result));
+        store(CacheKind.DETAIL, "detail:" + saleProductId, lease, () -> saleProductCacheCodec.encodeDetail(result));
     }
 
     @Override
     public void storePage(SaleProductCacheQuery query, CacheFillLease lease, CachedSaleProductPage result) {
-        store("list", pageSuffix(query), lease, () -> saleProductCacheCodec.encodePage(result));
+        store(CacheKind.LIST, pageSuffix(query), lease, () -> saleProductCacheCodec.encodePage(result));
     }
 
     @Override
@@ -102,14 +103,14 @@ public class RedisSaleProductReadCacheAdapter implements SaleProductReadCachePor
         }
         try {
             saleCacheStringRedisTemplate.opsForValue().set(GENERATION_KEY, UUID.randomUUID().toString());
-            operation("invalidate", "success");
+            saleCacheMetrics.recordInvalidation();
         } catch (DataAccessException exception) {
-            operation("invalidate", "error");
+            saleCacheMetrics.recordError(Operation.INVALIDATE);
             LOG.warn("판매 캐시 무효화 실패: 기존 TTL로 복구", exception);
         }
     }
 
-    private <T> CacheLookup<T> read(String kind, String suffix, long ttlMillis, Decoder<T> decoder) {
+    private <T> CacheLookup<T> read(CacheKind kind, String suffix, long ttlMillis, Decoder<T> decoder) {
         if (!enabled) {
             return CacheLookup.bypass();
         }
@@ -122,47 +123,47 @@ public class RedisSaleProductReadCacheAdapter implements SaleProductReadCachePor
                     List.of(GENERATION_KEY, key, key + ":lock"), generation, token,
                     Long.toString(lockLeaseMillis), Long.toString(jittered(ttlMillis)));
                 RedisCacheReadStatus status = parseReadStatus(result);
-                if (status != RedisCacheReadStatus.STALE) {
-                    meterRegistry.counter("sale.cache.lookup", "kind", kind, "result", status.name().toLowerCase(Locale.ROOT)).increment();
-                }
                 switch (status) {
                     case STALE -> {
                     }
                     case HIT -> {
+                        saleCacheMetrics.recordLookup(kind, CacheLookup.Status.HIT);
                         String payload = result.get(1).toString();
                         try {
                             return CacheLookup.hit(decoder.decode(payload));
                         } catch (JsonProcessingException | IllegalArgumentException exception) {
                             saleCacheStringRedisTemplate.execute(DELETE_IF_VALUE, List.of(key), payload);
-                            operation("decode", "error");
+                            saleCacheMetrics.recordError(Operation.DECODE);
                             return CacheLookup.bypass();
                         }
                     }
                     case CLAIMED -> {
+                        saleCacheMetrics.recordLookup(kind, CacheLookup.Status.CLAIMED);
                         return CacheLookup.claimed(new CacheFillLease(UUID.fromString(result.get(1).toString()),
                             UUID.fromString(result.get(2).toString()), Long.parseLong(result.get(3).toString())));
                     }
                     case BUSY -> {
+                        saleCacheMetrics.recordLookup(kind, CacheLookup.Status.BUSY);
                         return CacheLookup.busy();
                     }
                 }
             }
             return CacheLookup.bypass();
         } catch (DataAccessException | IllegalArgumentException exception) {
-            operation("read", "error");
+            saleCacheMetrics.recordError(Operation.READ);
             LOG.debug("판매 캐시 조회 실패: DB 조회로 전환", exception);
             return CacheLookup.bypass();
         }
     }
 
-    private void store(String kind, String suffix, CacheFillLease lease, Encoder encoder) {
+    private void store(CacheKind kind, String suffix, CacheFillLease lease, Encoder encoder) {
         try {
             String key = key(lease.generation().toString(), suffix);
             Long stored = saleCacheStringRedisTemplate.execute(STORE, List.of(GENERATION_KEY, key, key + ":lock"),
                 lease.generation().toString(), lease.token().toString(), Long.toString(lease.freshnessDeadlineEpochMillis()), encoder.encode());
-            meterRegistry.counter("sale.cache.write", "kind", kind, "result", Long.valueOf(1).equals(stored) ? "stored" : "rejected").increment();
+            saleCacheMetrics.recordWrite(kind, Long.valueOf(1).equals(stored));
         } catch (DataAccessException | JsonProcessingException exception) {
-            operation("store", "error");
+            saleCacheMetrics.recordError(Operation.STORE);
             LOG.debug("판매 캐시 저장 실패: DB 결과 유지", exception);
         }
     }
@@ -172,7 +173,7 @@ public class RedisSaleProductReadCacheAdapter implements SaleProductReadCachePor
             saleCacheStringRedisTemplate.execute(DELETE_IF_VALUE,
                 List.of(key(lease.generation().toString(), suffix) + ":lock"), lease.token().toString());
         } catch (DataAccessException exception) {
-            operation("release", "error");
+            saleCacheMetrics.recordError(Operation.RELEASE);
             LOG.debug("판매 캐시 lock 반환 실패: Lease 만료로 복구", exception);
         }
     }
@@ -186,7 +187,7 @@ public class RedisSaleProductReadCacheAdapter implements SaleProductReadCachePor
                 }
             } catch (IllegalArgumentException exception) {
                 saleCacheStringRedisTemplate.execute(DELETE_IF_VALUE, List.of(GENERATION_KEY), generation);
-                operation("decode", "error");
+                saleCacheMetrics.recordError(Operation.DECODE);
                 generation = null;
             }
         }
@@ -209,10 +210,6 @@ public class RedisSaleProductReadCacheAdapter implements SaleProductReadCachePor
 
     private String key(String generation, String suffix) {
         return PREFIX + generation + ":" + suffix;
-    }
-
-    private void operation(String operation, String result) {
-        meterRegistry.counter("sale.cache.operations", "operation", operation, "result", result).increment();
     }
 
     private RedisCacheReadStatus parseReadStatus(List<?> response) {

@@ -5,9 +5,7 @@ import com.example.limitedticketing.purchasewaiting.application.port.in.worker.d
 import com.example.limitedticketing.purchasewaiting.application.port.in.worker.dto.ReservationJobOutcome;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
+import com.example.limitedticketing.purchasewaiting.infrastructure.metrics.ReservationMessagingMetrics;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -23,19 +21,13 @@ public class ReservationKafkaConsumer {
     public static final String LISTENER_ID = "purchasewaiting-reservation";
     private final PurchaseWaitingReservationPort purchaseWaitingReservationPort;
     private final ObjectMapper objectMapper;
-    private final Timer executionTimer;
-    private final Counter completedCounter;
-    private final Counter retryCounter;
-    private final Counter rejectedCounter;
+    private final ReservationMessagingMetrics reservationMessagingMetrics;
 
     public ReservationKafkaConsumer(PurchaseWaitingReservationPort purchaseWaitingReservationPort,
-        ObjectMapper objectMapper, MeterRegistry meterRegistry) {
+        ObjectMapper objectMapper, ReservationMessagingMetrics reservationMessagingMetrics) {
         this.purchaseWaitingReservationPort = purchaseWaitingReservationPort;
         this.objectMapper = objectMapper;
-        executionTimer = meterRegistry.timer("reservation.consumer.duration");
-        completedCounter = meterRegistry.counter("reservation.consumer.records", "outcome", "completed");
-        retryCounter = meterRegistry.counter("reservation.consumer.records", "outcome", "retry");
-        rejectedCounter = meterRegistry.counter("reservation.consumer.records", "outcome", "rejected");
+        this.reservationMessagingMetrics = reservationMessagingMetrics;
     }
 
     @KafkaListener(id = LISTENER_ID, topics = "${limited-ticketing.kafka.reservation-topic:limited-ticketing.purchasewaiting.reservation.v1}",
@@ -44,16 +36,16 @@ public class ReservationKafkaConsumer {
         ReservationJobInput input = parse(record);
         ReservationJobOutcome outcome;
         try {
-            outcome = executionTimer.record(() -> purchaseWaitingReservationPort.execute(input));
+            outcome = reservationMessagingMetrics.measureExecution(() -> purchaseWaitingReservationPort.execute(input));
         } catch (IllegalArgumentException exception) {
-            rejectedCounter.increment();
+            reservationMessagingMetrics.recordConsumerRejected();
             throw new InvalidReservationMessageException("Reservation message has no matching durable job", exception);
         }
         if (outcome == ReservationJobOutcome.RETRY) {
-            retryCounter.increment();
+            reservationMessagingMetrics.recordConsumerRetry();
             acknowledgment.nack(Duration.ofSeconds(1));
         } else {
-            completedCounter.increment();
+            reservationMessagingMetrics.recordConsumerCompleted();
             acknowledgment.acknowledge();
         }
     }
@@ -77,7 +69,7 @@ public class ReservationKafkaConsumer {
                 UUID.fromString(json.path("waitingEntryId").textValue()), saleProductId,
                 UUID.fromString(json.path("processingToken").textValue()));
         } catch (Exception exception) {
-            rejectedCounter.increment();
+            reservationMessagingMetrics.recordConsumerRejected();
             throw new InvalidReservationMessageException("Invalid reservation message contract", exception);
         }
     }

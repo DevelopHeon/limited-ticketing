@@ -17,7 +17,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 @Configuration(proxyBeanMethods = false)
 public class SaleProductCacheConfiguration {
     @Bean
-    public MeterBinder saleCacheMetrics(@Value("${limited-ticketing.sale-cache.enabled:true}") boolean enabled) {
+    public MeterBinder saleCacheEnabledMetrics(@Value("${limited-ticketing.sale-cache.enabled:true}") boolean enabled) {
         return registry -> Gauge.builder("sale.cache.enabled", () -> enabled ? 1 : 0).register(registry);
     }
 

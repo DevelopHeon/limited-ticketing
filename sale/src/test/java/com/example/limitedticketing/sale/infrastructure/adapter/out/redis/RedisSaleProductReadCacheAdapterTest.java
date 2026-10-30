@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 
 import com.example.limitedticketing.sale.application.port.out.dto.CacheLookup;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.limitedticketing.sale.infrastructure.metrics.SaleCacheMetrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.Arrays;
 import java.util.List;
@@ -40,7 +41,7 @@ class RedisSaleProductReadCacheAdapterTest {
     void prepareAdapter() {
         meterRegistry = new SimpleMeterRegistry();
         redisSaleProductReadCacheAdapter = new RedisSaleProductReadCacheAdapter(stringRedisTemplate,
-            new SaleProductCacheCodec(new ObjectMapper()), meterRegistry, true, 30000, 10000, 2000, 10);
+            new SaleProductCacheCodec(new ObjectMapper()), new SaleCacheMetrics(meterRegistry), true, 30000, 10000, 2000, 10);
         when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get(any())).thenReturn(generation);
     }

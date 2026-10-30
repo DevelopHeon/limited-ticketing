@@ -77,3 +77,5 @@ Lua의 `HIT·CLAIMED·BUSY·STALE` 응답은 Adapter 내부 `RedisCacheReadStatu
 | `sale_cache_operations_total{operation,result}` | read/store/release/decode/invalidate의 오류와 무효화 성공 |
 
 lookup은 polling마다 증가하므로 HTTP 요청 수와 다르다. 손상된 값은 lookup hit 뒤 decode 오류로 DB 전환할 수 있다. SQL 수는 통합 테스트의 Hibernate Statistics로 검증하며 이 counter를 SQL 실행 횟수로 해석하지 않는다. 상품 ID·요청 key를 label로 사용하지 않는다.
+
+캐시 Counter의 이름·태그 정의는 Infrastructure의 `SaleCacheMetrics`가 소유한다. Adapter는 타입으로 제한된 조회 종류·상태·작업 결과를 명시적으로 기록한다. polling·decode·저장 거절의 기존 측정 시점을 유지하며 AOP로 메서드 호출 횟수와 치환하지 않는다. 활성 설정 Gauge는 기존 Configuration에서 등록한다.

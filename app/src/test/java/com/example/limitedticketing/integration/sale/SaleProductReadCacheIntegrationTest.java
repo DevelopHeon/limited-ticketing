@@ -42,6 +42,7 @@ import com.example.limitedticketing.sale.infrastructure.adapter.out.redis.RedisS
 import com.example.limitedticketing.sale.infrastructure.adapter.out.redis.SaleProductCacheCodec;
 import com.example.limitedticketing.shared.vo.Money;
 import com.example.limitedticketing.shared.vo.SalePeriod;
+import com.example.limitedticketing.sale.infrastructure.metrics.SaleCacheMetrics;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.persistence.EntityManagerFactory;
 import java.math.BigDecimal;
@@ -294,7 +295,7 @@ class SaleProductReadCacheIntegrationTest {
     void expiredOwnerCannotPublishOrReleaseTheNewOwner() {
         long saleId = fixture();
         RedisSaleProductReadCacheAdapter shortLeaseAdapter = new RedisSaleProductReadCacheAdapter(
-            saleCacheStringRedisTemplate, saleProductCacheCodec, meterRegistry, true, 30000, 10000, 50, 0);
+            saleCacheStringRedisTemplate, saleProductCacheCodec, new SaleCacheMetrics(meterRegistry), true, 30000, 10000, 50, 0);
         CacheFillLease old = shortLeaseAdapter.findDetail(saleId).lease();
         await().atMost(Duration.ofSeconds(3)).until(() -> !Boolean.TRUE.equals(
             saleCacheStringRedisTemplate.hasKey(detailKey(old.generation(), saleId) + ":lock")));

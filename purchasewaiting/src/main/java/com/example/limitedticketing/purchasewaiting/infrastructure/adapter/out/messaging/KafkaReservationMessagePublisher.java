@@ -2,8 +2,7 @@ package com.example.limitedticketing.purchasewaiting.infrastructure.adapter.out.
 
 import com.example.limitedticketing.purchasewaiting.application.port.out.ReservationMessagePublisherPort;
 import com.example.limitedticketing.purchasewaiting.application.port.out.dto.ReservationOutboxMessage;
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.MeterRegistry;
+import com.example.limitedticketing.purchasewaiting.infrastructure.metrics.ReservationMessagingMetrics;
 import java.util.concurrent.CompletableFuture;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
@@ -11,27 +10,25 @@ import org.springframework.stereotype.Component;
 @Component
 public class KafkaReservationMessagePublisher implements ReservationMessagePublisherPort {
     private final KafkaTemplate<String, String> kafkaTemplate;
-    private final Counter acknowledgedCounter;
-    private final Counter failedCounter;
+    private final ReservationMessagingMetrics reservationMessagingMetrics;
 
-    public KafkaReservationMessagePublisher(KafkaTemplate<String, String> kafkaTemplate, MeterRegistry meterRegistry) {
+    public KafkaReservationMessagePublisher(KafkaTemplate<String, String> kafkaTemplate, ReservationMessagingMetrics reservationMessagingMetrics) {
         this.kafkaTemplate = kafkaTemplate;
-        acknowledgedCounter = meterRegistry.counter("reservation.outbox.publish", "result", "acknowledged");
-        failedCounter = meterRegistry.counter("reservation.outbox.publish", "result", "failed");
+        this.reservationMessagingMetrics = reservationMessagingMetrics;
     }
 
     @Override
     public CompletableFuture<Void> publish(ReservationOutboxMessage message) {
         try {
             return kafkaTemplate.send(message.topic(), message.key(), message.payload())
-                .thenAccept(result -> acknowledgedCounter.increment())
+                .thenAccept(result -> reservationMessagingMetrics.recordPublishAcknowledged())
                 .whenComplete((ignored, failure) -> {
                     if (failure != null) {
-                        failedCounter.increment();
+                        reservationMessagingMetrics.recordPublishFailed();
                     }
                 });
         } catch (RuntimeException exception) {
-            failedCounter.increment();
+            reservationMessagingMetrics.recordPublishFailed();
             return CompletableFuture.failedFuture(exception);
         }
     }

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import com.example.limitedticketing.purchasewaiting.application.port.out.dto.ReservationOutboxMessage;
+import com.example.limitedticketing.purchasewaiting.infrastructure.metrics.ReservationMessagingMetrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -20,7 +21,7 @@ class KafkaReservationMessagePublisherTest {
     @SuppressWarnings("unchecked")
     private final KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
-    private final KafkaReservationMessagePublisher publisher = new KafkaReservationMessagePublisher(kafkaTemplate, meterRegistry);
+    private final KafkaReservationMessagePublisher publisher = new KafkaReservationMessagePublisher(kafkaTemplate, new ReservationMessagingMetrics(meterRegistry));
 
     @Test
     @DisplayName("Kafka ACK 전에 성공 Future나 성공 지표를 확정하지 않는다")

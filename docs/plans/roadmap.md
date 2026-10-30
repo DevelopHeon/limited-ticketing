@@ -16,6 +16,8 @@
 
 - 6개 업무 모듈의 필수 조회·부재 예외를 7개 Domain Repository의 default 메서드로 모았다. `./gradlew check`에서 Java 289개 테스트와 아키텍처·컨벤션 검사를 통과했다. Optional·잠금·업무 검증의 경계는 [모듈 설계](../architecture/module-boundaries.md#aggregate-영속성과-application-출력-계약)를 따른다. 기존 미커밋 DTO 변환 변경은 이번 commit에서 제외한다.
 
+- 캐시·Kafka의 지표 정의를 전용 Metrics 클래스로 옮겼다. DB 원장 Gauge는 Kafka 기본 지표로 대체할 수 없고 전달 지연 Monitor에서도 사용하므로 유지한다. 기존 지표 이름·태그·Future 완료 시점·Consumer 실행 구간을 보존했다. `./gradlew check`에서 Java 327개와 아키텍처·컨벤션 검사가 통과했고 독립 리뷰에서 확정 결함은 없었다. commit/push와 기존 4단계 Notion 기록 갱신 후 사용자 검토를 기다린다. Gauge 집계의 실제 지연·부하 비용은 미측정이며 다음 단계는 시작하지 않는다.
+
 ## 단계별 진행
 
 | 단계 | 상태 | 확인할 근거 |

@@ -106,7 +106,7 @@ docker compose --profile kafka exec -T kafka-1 /opt/kafka/bin/kafka-consumer-gro
 curl -H 'X-Admin-Id: admin' http://localhost:8082/actuator/prometheus
 ```
 
-통합 실행이면 metrics 포트도 8081이다. 분리 실행에서 기존 Prometheus 기본 대상은 API 8081이며 Worker metrics는 8082에서 별도로 확인한다. `reservation.outbox.pending`, `reservation.outbox.oldest.seconds`, `reservation.dispatched.oldest.seconds`, 상태별 `reservation.waiting.entries`, `reservation.execution.attempts`, `reservation.consumer.duration`과 Kafka client의 lag·assignment 지표를 함께 본다. Worker의 전달 지연 Monitor가 60초 주기로 확인해 60초 이상인 경우 WARN을 남긴다. Broker·Publisher·Consumer 상태와 token을 조사한다.
+통합 실행이면 metrics 포트도 8081이다. 분리 실행에서 기존 Prometheus 기본 대상은 API 8081이며 Worker metrics는 8082에서 별도로 확인한다. `reservation.outbox.pending`, `reservation.outbox.oldest.seconds`, `reservation.dispatched.oldest.seconds`, 상태별 `reservation.waiting.entries`, `reservation.execution.attempts`, `reservation.consumer.duration`과 Kafka client의 lag·assignment 지표를 함께 본다. Worker의 전달 지연 Monitor가 60초 주기로 확인해 60초 이상인 경우 WARN을 남긴다. `PurchaseWaitingMetricsConfiguration`의 원장 Gauge는 상태별 6회와 Outbox/전달 지연/시도 집계 4회로 전체 scrape마다 DB 집계 조회 10회를 수행한다. Monitor도 해당 지연 Gauge를 직접 읽으므로 DB를 다시 조회한다. Kafka lag만으로 DB Outbox 적체·전달 후 정체·업무 상태를 알 수 없어 유지하며, 기본 5초 scrape의 조회 비용은 인스턴스 수와 함께 증가한다. 같은 DB를 보는 API·Worker의 원장 Gauge는 중복된 집계이므로 인스턴스별 값을 단순 합산하지 않는다. Broker·Publisher·Consumer 상태와 token을 조사한다.
 
 JSON/version/key 오류는 DLT 전달 확인 후 offset을 저장한다. DB 확인 또는 DLT 전달이 불가해 Consumer가 정지하면 먼저 원인을 해결한 뒤 Worker를 재시작한다. offset을 임의로 건너뛰지 않는다. 기술 FAILED 또는 발행 후 60초 이상 지난 DISPATCHED는 관리자 `POST /api/admin/queue-entries/{id}/replay`로 재처리하며, 허용·거부 조건은 [현재 계약](../architecture/purchase-waiting.md#관리자-재처리)을 따른다.
 
@@ -173,3 +173,5 @@ Grafana는 `http://localhost:3000`, 사용자는 `admin`이며 최초 비밀번�
 이미 `grafana-data`에 관리자 계정이 초기화되어 있으면 파일을 바꿔도 기존 계정 비밀번호는 자동 변경되지 않는다. 기존 암호를 계속 사용하고, 변경이 필요하면 로그인 후 계정 설정에서 변경한다. 비밀번호를 맞추려고 데이터 볼륨을 삭제하지 않는다. 최초 설정 파일과 변경한 계정 암호가 서로 다를 수 있으므로 기존 계정의 변경 이력을 함께 확인한다.
 
 평가 도구 사용은 [자동 기준선](../performance/load-testing.md#자동-기준선--현재-평가-도구)을 따른다.
+
+Kafka Counter·Timer 정의는 `ReservationMessagingMetrics`에 모은다. Publisher는 Future 완료 콜백에서 성공·실패를 기록하고, Consumer는 실행 UseCase 구간만 시간 측정한다. consumer completed는 Consumer의 완료 응답 분기이며 구매 결제 성공 건수가 아니다. AOP·추가 polling·집계 캐시는 도입하지 않는다.

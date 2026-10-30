@@ -1,6 +1,7 @@
 package com.example.limitedticketing.purchasewaiting.infrastructure.adapter.in.messaging;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -9,6 +10,7 @@ import static org.mockito.Mockito.when;
 import com.example.limitedticketing.purchasewaiting.application.port.in.worker.PurchaseWaitingReservationPort;
 import com.example.limitedticketing.purchasewaiting.application.port.in.worker.dto.ReservationJobOutcome;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.limitedticketing.purchasewaiting.infrastructure.metrics.ReservationMessagingMetrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.UUID;
@@ -21,13 +23,16 @@ import org.springframework.kafka.support.Acknowledgment;
 class ReservationKafkaConsumerTest {
     private final PurchaseWaitingReservationPort purchaseWaitingReservationPort = mock(PurchaseWaitingReservationPort.class);
     private final Acknowledgment acknowledgment = mock(Acknowledgment.class);
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private final ReservationKafkaConsumer reservationKafkaConsumer = new ReservationKafkaConsumer(
-        purchaseWaitingReservationPort, new ObjectMapper(), new SimpleMeterRegistry());
+        purchaseWaitingReservationPort, new ObjectMapper(), new ReservationMessagingMetrics(meterRegistry));
 
     @Test
     @DisplayName("지원하지 않는 버전은 예약을 실행하거나 offset을 저장하지 않는다")
     void rejectsUnknownSchemaVersion() {
         assertThatThrownBy(() -> reservationKafkaConsumer.receive(record("1", json(2)), acknowledgment)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(meterRegistry.get("reservation.consumer.records").tag("outcome", "rejected").counter().count()).isEqualTo(1);
+        assertThat(meterRegistry.get("reservation.consumer.duration").timer().count()).isZero();
         verify(purchaseWaitingReservationPort, never()).execute(any());
         verify(acknowledgment, never()).acknowledge();
     }
@@ -52,8 +57,20 @@ class ReservationKafkaConsumerTest {
     void retriesWithoutCommittingOffset() {
         when(purchaseWaitingReservationPort.execute(any())).thenReturn(ReservationJobOutcome.RETRY);
         reservationKafkaConsumer.receive(record("1", json(1)), acknowledgment);
+        assertThat(meterRegistry.get("reservation.consumer.records").tag("outcome", "retry").counter().count()).isEqualTo(1);
+        assertThat(meterRegistry.get("reservation.consumer.duration").timer().count()).isEqualTo(1);
         verify(acknowledgment).nack(Duration.ofSeconds(1));
         verify(acknowledgment, never()).acknowledge();
+    }
+
+    @Test
+    @DisplayName("처리 완료 응답은 완료 지표와 실행 시간 한 건을 기록한 뒤 ACK한다")
+    void completionRecordsOutcomeAndExecutionDuration() {
+        when(purchaseWaitingReservationPort.execute(any())).thenReturn(ReservationJobOutcome.COMPLETED);
+        reservationKafkaConsumer.receive(record("1", json(1)), acknowledgment);
+        assertThat(meterRegistry.get("reservation.consumer.records").tag("outcome", "completed").counter().count()).isEqualTo(1);
+        assertThat(meterRegistry.get("reservation.consumer.duration").timer().count()).isEqualTo(1);
+        verify(acknowledgment).acknowledge();
     }
 
     private ConsumerRecord<String, String> record(String key, String payload) {
